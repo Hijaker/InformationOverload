@@ -24,6 +24,12 @@ If a mission cannot start, the board aims to show who is blocking the start and 
 
 Other areas to explore include reload time saved by using reload speed talents, debuff stacks, such as brittleness and Skullcrusher, how many enemies you were able to stagger due to an Impact Talent or Blessing, and how often a cleave bonus lets an attack reach additional targets, and how many that might be.
 
+## Impact and Cleave Calculator
+
+Wondering if that 50% Cleave talent will actually make a difference in how many enemies you can hit? Put your build together, and calculate your cleave with different weapons and blessings, compare different enemies and difficulties, maybe even 100% cleave will only get you 90% of the way there to be able to cleave an additional Enemy, allowing you to put that talent point into a defensive talent, or just more damage instead.
+Maybe that slightly lower 25% Strength versus 50% damage might actually be worth it, just barely pushing you above the cleave-threshold, allowing you to do more damage per second into hordes, but lowering your damage just slightly.
+Compare the amount of impact needed to stagger different enemies, with different modifiers, allowing you to prepare ahead of time for being able to stagger that crusher out of it's overhead.
+
 ## Weapon Breakdowns
 
 A goal is to allow you to sort the weapons by class. The Tactical Axe or the Combat Blade are available to a lot of different classes. But a Zealot and a Psyker should not expect similar outputs from the Combat Blade, by virtue of the difference between their available modifiers to Melee Attacks, Crit Chance, Backstab and more.
@@ -35,6 +41,8 @@ Peril is an important stat for Psykers, and being able to see your own Peril sta
 Stamina is an oft-forgotten stat, and for a lot of people it's simply "The Sprint Bar", getting more detailed stats on Stamina Usage, in relation to both sprinting, blocking and pushing can help you pin down areas that you might be able to improve.
 
 Several Talents and Blessings care about your distance to your targets, with a detailed breakdown of the distance to enemies you deal damage to, will help you evaluate if a blessing like Deathspitter is really worth it for how you play, or it just looks like it should be.
+
+
 
 ## Overflow Meter
 
