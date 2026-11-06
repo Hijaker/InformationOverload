@@ -35,11 +35,11 @@ Once you're in the game, enter `/io` or `/io_dashboard` in chat to open the dash
 
 Play a mission, then return to the dashboard. There is no need to manually save ordinary missions. Some summaries finish updating after you return to the Mourningstar, so a temporary counting or preparation message can appear before the numbers are ready.
 
-Start with **Overview** for a broad picture, **Match History** for a particular run, or **Weapons** for equipment comparisons. Open **Settings › Screens** to choose which additional game screens should show Information Overload's panels.
+Start with **Overview** for a broad picture, **Match History** for a particular run, or **Weapons** for equipment comparisons. Open **Settings › Screens** to choose which additional game screens you want Information Overload's panels to show on. They all come enabled by default, so make sure you have a look in case you want to turn some of them off.
 
 ### Finding your way around
 
-The navigation rail opens the dashboard pages. Its names can be pinned open. Page tabs and detail selectors provide more focused views, and the breadcrumb trail shows where you are. Back navigation lets you return from a record or mission to the page you came from.
+The navigation rail opens the dashboard pages. Its names can be pinned open in the settings. Page tabs and detail selectors provide more focused views, and the breadcrumb trail shows where you are. Back navigation lets you return from a record or mission to the page you came from.
 
 Many record cards, mission rows and chart points open the mission behind the number. Use those links to check the conditions in which a result was set instead of judging the number alone.
 
@@ -161,7 +161,7 @@ For example, if your damage rises after switching weapons, check whether your mi
 
 Records is the place to find exceptional individual results, rather than your average performance. Its **Damage** and **Non-Damage** tabs separate offensive bests from incident-based records.
 
-Damage records include the **Biggest Single-Target Hit**, **Biggest Melee Cleave** and **Biggest Explosion**. Detailed views organize saved records overall, by armour, by enemy or by weapon. Where a source mission was saved, you can open it to see the context.
+Damage records include the **Biggest Single-Target Hit**, **Biggest Melee Cleave** and **Biggest Explosion**. Detailed views organize saved records overall, by armour, by enemy or by weapon (Only available when filtering by class). Where a source mission was saved, you can open it to see the context.
 
 Non-Damage records include observed downs, deaths, Pox Hound pounces, Trapper nets, Mutant catches, pickups and friendly-fire damage, with personal and team distinctions and outcome filtering where available.
 
@@ -244,7 +244,8 @@ Speedrunning lists your fastest recorded clears by map, organized by mission are
 
 ### Match Time
 
-**Match Time** uses the duration supplied by the game's backend in its end-of-match report. It is displayed to milliseconds: for example, **32:31.200**. This allows us to ensure that the time you got for a map, is timed the exact same way one of your friends map was. By using the Server's own supplied mission timing, we remove the uncertainty that Latency and Hardware adds to the game, and simultaneously allows us to give you a time for a map that you happened to disconnect from, in case of a crash or similar. As long as you're present for the end of the map, your time will be saved.
+**Match Time** uses the duration supplied by the game's backend in its end-of-match report. It is displayed to milliseconds: for example, **32:31.200**. This allows us to ensure that the time you got for a map, is timed the exact same way one of your friends map was. By using the Server's own supplied mission timing, we remove the uncertainty that Latency and Hardware adds to the game, and simultaneously allows us to give you a time for a map that you happened to disconnect from, in case of a crash or similar.
+One important distinction is that for Speedrunning stats and Fastest Times, only Havoc 40 will allow these "Partial Runs" to count, but for other difficulties you will be able to see the time, it just won't set a record if it's not a full run. But, sa long as you're present for the end of the map, your time will be saved.
 
 The report can arrive after the initial save, so the displayed Match Time can update once it is received.
 
@@ -270,7 +271,7 @@ Team summarizes the squads you have played with. Its tabs are **Bosses**, **Clut
 
 **Clutches** shows recorded clutch results by operative. A semi-clutch begins with only one operative able to act while at least one other teammate is still down and potentially revivable. A full clutch has all the other teammates dead or awaiting rescue; a semi-clutch can become a full clutch situation if the remaining downed teammates die. A successful clutch is recorded when a teammate returns to an active state while the clutching operative survives. A clutch episode and a mission won with a clutch are separate counts: one successful mission can contain several clutch situations.
 
-**Fun** collects unusual team-wide statistics, including recorded bot clutches (Disconnecting from a game, to create a bot that potentially gets an ally back on their feat) and Havoc departure/rejoin patterns. The **Leave Abuse** label describes detected patterns around disconnecting during situations such as a net, knock-off or death; it is not proof of a player's intention though. **Settings › Display › Name Leave Abusers** controls whether names or only counts are shown.
+**Fun** collects unusual team-wide statistics, including recorded bot clutches (Disconnecting from a game, to create a bot that potentially gets an ally back on their feet) and Havoc departure/rejoin patterns. The **Leave Abuse** label describes detected patterns around disconnecting during situations such as a net, knock-off or death; it is not proof of a player's intention though. **Settings › Display › Name Leave Abusers** controls whether names or only counts are shown.
 
 Use team records to revisit memorable runs, while checking the mission context before judging another player from a single number.
 
@@ -343,7 +344,7 @@ You can also hide the mission-rating thumbs without submitting a rating automati
 
 ### Display and controls
 
-Display settings include compact K/M numbers or full numbers, relevant exact-value hovers, a favourite class, preferred starting mode, remembered page positions and the Match Time display. You can hide names in the departure-pattern section while retaining counts.
+Display settings include compact K/M numbers or full numbers, a favourite class, preferred starting mode, remembered page positions and the Match Time display. You can hide names in the departure-pattern section while retaining counts.
 
 Mod Options contains dashboard/scoreboard keybinds and the switch for Psykhanium tracking. Most presentation and screen choices are inside the dashboard's Settings page.
 
