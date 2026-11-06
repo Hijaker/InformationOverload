@@ -66,6 +66,13 @@ In a future patch, we're planning on adding the ability to compare 2 matches to 
 
 What started out as a "Keep track of things" mod, has expanded to what can only be called an unnecessary amount of detail. We realised that we have basically created a scoreboard mod, so our goal is to look into how much more we could/want to add on the in-mission scoreboard.
 
+## Online Match History Sharing and Leaderboards
+
+We're discussing potentially adding online leaderboards, these would include Speedrunning records, sortable by composition, so we won't end up with 4 zealots using daggers and stealth being the top time on every map.
+See how other gunlugging Ogryns set up their builds, what blessings are common and have you perhaps cracked the code that no one else has?
+Are you dying a lot compared to other people on your class/archetype/build? Compare your deaths to other people, maybe you underestimated a talent, and you're missing out on a ton of Damage Reduction.
+A lot of things could be done here, we're looking for your suggestions on what could be good to have!
+
 ## Suggestions?
 
 Feel free to leave your suggestions for things you'd love to see us add, or things you'd love to be able to compare that we haven't thought of yet.
