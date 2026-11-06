@@ -1,4 +1,6 @@
 # What's Next for Information Overload
+# Planned Features
+
 
 ## Havoc Board
 
@@ -8,7 +10,7 @@ Any party member using the board will be able to press **Play** on any shared as
 
 The ability to place your vote for which of the assignements available to you, that you'd like to play.
 
-Preset your readiness state, to automatically accept a "Mission Start" popup-
+Preset your readiness state, to automatically accept a "Mission Start" popup.
 
 - **Ready** automatically accepts any map you've voted for that you'd like to play.
 - **No choice yet** leaves the normal game popup for you to answer.
