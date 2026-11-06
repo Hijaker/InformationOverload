@@ -1,4 +1,5 @@
 # Information Overload
+<sub><label align="center"><i>(By HijaKer and LilyMods)</i></label></sub>
 
 Information Overload gives your Darktide missions a history. It brings together mission results, combat statistics, personal records, weapon comparisons and the people you play with, so you can return to a run and see more than whether you won or lost.
 
