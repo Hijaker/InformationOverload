@@ -186,15 +186,23 @@ local function table_row(r,ry,w)
  local d=BAR_COLS[1];T(commas(r.damage),d[3]-d[4],ry+4,d[4],32,26,gold(r,"damage"),"right",F.title);B(d[3]-120,ry+40,120,r.share,r.you and C.gold or C.label)
  for j=2,#BAR_COLS do local c=BAR_COLS[j];T(commas(r[c[1]]),c[3]-c[4],ry,c[4],52,24,plain[c[1]]and C.value or gold(r,c[1]),"right",F.title)end
 end
--- the kinds bar along the foot of a row, each count inside its part or, too small for it, just after the bar; the bar gives way to counts that would run past the box
-local function kinds(r,ry,w)
+-- how far the counts too small for their parts run past a bar bw long
+local function past(r,bw)
+ local sum,out=0,0;for _,k in ipairs(KIND)do sum=sum+(r[k]or 0)end;if sum<=0 then return 0 end
+ for _,k in ipairs(KIND)do local v=r[k]or 0;if v>0 and width(commas(v),13,F.title)+10>bw*v/sum-2 then out=out+width(commas(v),13,F.title)+8 end end
+ return out
+end
+-- one length for every row's kinds bar, out to under Deaths, all of them coming in together only as far as a count after a bar needs;
+-- a shorter bar can only push more counts out, so this settles within the four kinds
+local function kinds_width(rows,w)
+ local full=w-60;local bw=full
+ for _=1,5 do local room=full;for _,r in ipairs(rows)do room=math.min(room,full-past(r,bw))end;if bw<=room then break end;bw=math.max(40,room)end
+ return bw
+end
+-- the kinds bar along the foot of a row, each count inside its part or, too small for it, just after the bar
+local function kinds(r,ry,bw)
  local sum=0;for _,k in ipairs(KIND)do sum=sum+(r[k]or 0)end;if sum<=0 then return end
- local sx,sy,sh,bw=30,ry+57,18,880
- -- a shorter bar can only push more counts out, so this settles within the four kinds
- for _=1,5 do local out=0
-  for _,k in ipairs(KIND)do local v=r[k]or 0;if v>0 and width(commas(v),13,F.title)+10>bw*v/sum-2 then out=out+width(commas(v),13,F.title)+8 end end
-  local room=w-12-(sx+8)-out;if bw<=room then break end;bw=math.max(40,room)
- end
+ local sx,sy,sh=30,ry+57,18
  local cx,out=sx,sx+bw+8
  for _,k in ipairs(KIND)do local v=r[k]or 0;local kw=bw*v/sum
   if v>0 then R(cx,sy,math.max(2,kw-2),sh,KIND_COL[k],2)
@@ -219,7 +227,7 @@ local function table_extra(rows)
  local n=#rows;local w,h=S.size("squad","table",n,nil,true)
  box(PEN,X0,Y0,w*FS,h*FS,C.frame)
  T("PLAYER",30,8,200,22,15,C.muted,"left",F.body);for _,c in ipairs(BAR_COLS)do T(c[2],c[3]-c[4],8,c[4],22,15,C.muted,"right",F.body)end
- for i,r in ipairs(rows)do local ry=52+(i-1)*84;table_row(r,ry,w);kinds(r,ry,w)end
+ local bw=kinds_width(rows,w);for i,r in ipairs(rows)do local ry=52+(i-1)*84;table_row(r,ry,w);kinds(r,ry,bw)end
  key(rows.totals or EMPTY,52+n*84+10,w)
  return w*FS,h*FS
 end

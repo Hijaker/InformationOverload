@@ -84,12 +84,12 @@ function T.merge(a,b)
  return out
 end
 -- Derive compact graph rows on demand, never store a duplicate bucket truth.
--- keep, when given, picks which hits count
-function T.buckets(data,width,keep)
+-- keep, when given, picks which hits count, and shift, in milliseconds, moves where the buckets start
+function T.buckets(data,width,keep,shift)
  width=width or 10;assert(finite(width)and width>0,"Positive bucket width required")
  local out={}
  for si,s in ipairs(data.segments or {})do
-  local rows={};local origin=s.mission_origin_ms or s.start_ms
+  local rows={};local origin=(s.mission_origin_ms or s.start_ms)+(shift or 0)
   for _,e in ipairs(s.events)do
    if math.floor(e[7]/4)%2==0 and (not keep or keep(e,s))then
     local index=math.floor((e[1]-origin)/(width*1000))

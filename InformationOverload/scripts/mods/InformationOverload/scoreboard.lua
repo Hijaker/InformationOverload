@@ -44,7 +44,7 @@ function S.options(get)
  local end_layout=get("scoreboard_end_layout");if not VALID[end_layout]then end_layout="cards"end
  local key=get("scoreboard_key_mode");if not KEY_VALID[key]then key="hold_board"end;local own=get("scoreboard_key")
  -- Extra Stats is on unless turned off
- return {layout=layout,end_layout=end_layout,extra=get("scoreboard_extra")~=false,this_mission=get("scoreboard_this_mission")==true,esc=get("scoreboard_esc")~=false,dead=get("scoreboard_dead")==true,key=key,own_key=type(own)=="table"and own[1]~=nil}
+ return {layout=layout,end_layout=end_layout,extra=get("scoreboard_extra")~=false,this_mission=get("scoreboard_this_mission")==true,end_tm=get("scoreboard_end_tm")==true,esc=get("scoreboard_esc")~=false,dead=get("scoreboard_dead")==true,key=key,own_key=type(own)=="table"and own[1]~=nil}
 end
 -- The key's choice where it is pressed: on the end screen the Only choices give the panel back to the other gesture, and a Scoreboard Key of its own never opens the panel.
 function S.key_mode(mode,finished,own)
@@ -99,7 +99,55 @@ function S.squad_place(get,sw,sh,w,h,esc,below,extra)
   f=math.max(.1,math.min(1,((esc and sw or sw-465)-dx)/w,((esc and sh or sh-135)-dy)/h))end
  local x,y=S.place("squad",get,sw,sh,w*f,h*f,esc,below);return x,y,f
 end
+-- On the end screen the squad, unless moved, lines up with the game's four currency boxes under it, 216 wide and 25 apart in a row centred on
+-- the screen: four Squad Cards with their right edges on the boxes', as near as the cards' 240 step allows, fewer kept to the middle by half a
+-- step each, any other layout centred over the row.
+function S.end_place(get,sw,sh,w,h,layout,extra)
+ local x,y,f=S.squad_place(get,sw,sh,w,h,false,nil,extra);local k=S.KEYS.squad
+ if tonumber(get(k[1]))~=nil or tonumber(get(k[2]))~=nil then return x,y,f end
+ local row=(sw-(216*4+25*3))/2
+ local n=math.max(1,math.min(4,math.floor((w+10)/240+.5)))
+ return clamp(layout=="cards"and row+216-230+1.5+(4-n)*120*f or (sw-w*f)/2,0,sw-w*f),y,f
+end
+-- the Tracker Panel on the end screen rests just above the squad, centred on it
+function S.end_tm_place(sw,x,y,w,tw,th)return clamp(x+(w-tw)/2,0,sw-tw),math.max(0,y-th-12)end
 function S.fraction(px,py,sw,sh,w,h)return clamp(px,0,sw-w)/sw,clamp(py,0,sh-h)/sh end
+-- Where the held Tracker Panel, or with squad the squad, shows with the game's Tab overlay up ("tab") or down ("plain"), the usual one first, nil
+-- for no second: holding Tab as I/O's key always raises the overlay, while a tapped-on scoreboard, another key or being dead leaves it down until
+-- Tab is held over it; the squad never shows while dead, and the panel shows held only with This Mission on
+function S.tm_shapes(o,tab_key,squad)
+ local hold_tab=tab_key==true and not o.own_key and (o.key=="hold_board"or o.key=="hold_only")
+ if hold_tab and (squad or o.this_mission)then return "tab",not squad and o.dead and "plain"or nil end
+ return "plain","tab"
+end
+-- the held Tracker Panel's box in a shape, at its place: the Tab overlay's slot, or its own panel at its tallest, so a best-clear line never moves it
+function S.tm_box(shape,sw,sh,get)
+ if shape=="tab"then local x,y,_,_,w,h=S.tab_slot(sw,sh,get);return x,y,w,h end
+ local w,h=S.size("tm",nil,nil,true);local x,y=S.place("tm",get,sw,sh,w,h);return x,y,w,h
+end
+-- What the Move screen shows for kind, every place read as the HUD reads it through get: first the box, in the shape and place it usually shows,
+-- then an outline wherever it shows instead, each {x,y,w,h,label,say,strip}, strip marking a Tracker Panel whose bottom 50 shows only with a best clear.
+-- below is how far down an unmoved squad starts under this mission's Special Condition with the Tab overlay up, where that is known.
+function S.move_boxes(kind,o,tab_key,layout,n,sw,sh,get,below)
+ local main,other=S.tm_shapes(o,tab_key,kind=="squad");local out={}
+ local SAY={["With The Tab Overlay"]="with the Tab overlay up",["Without The Tab Overlay"]="without the Tab overlay",["Over The Esc Menu"]="over the Esc menu"}
+ local function add(x,y,w,h,label,strip)out[#out+1]={x=x,y=y,w=w,h=h,label=label,say=SAY[label],strip=strip}end
+ if kind=="tm"then
+  for _,shape in ipairs({main,other})do local x,y,w,h=S.tm_box(shape,sw,sh,get);add(x,y,w,h,shape=="tab"and "With The Tab Overlay"or "Without The Tab Overlay",shape=="plain")end
+ elseif kind=="tm_esc"then local w,h=S.size("tm_esc",nil,nil,true);local x,y=S.place("tm_esc",get,sw,sh,w,h);add(x,y,w,h,nil,true)
+ else
+  local extra=o.extra and S.EXTRA[layout]==true;local w,h=S.size("squad",layout,n,true,extra)
+  local px,py,pf=S.squad_place(get,sw,sh,w,h,false,nil,extra);local tx,ty,tf=S.squad_place(get,sw,sh,w,h,false,below,extra)
+  local plain,tab={px,py,w*pf,h*pf,"Without The Tab Overlay"},{tx,ty,w*tf,h*tf,"With The Tab Overlay"}
+  if main=="tab"then add(unpack(tab));if other then add(unpack(plain))end else add(unpack(plain));if other then add(unpack(tab))end end
+  -- held over the Esc menu it starts under that menu's Tracker Panel, which shows only with Tracker on
+  if o.esc and get("screen_tracker")~=false then local ex,ey,ef=S.squad_place(get,sw,sh,w,h,true,nil,extra);add(ex,ey,w*ef,h*ef,"Over The Esc Menu")end
+ end
+ -- an outline where the box already is says nothing
+ local keep,b={out[1]},out[1]
+ for i=2,#out do local g=out[i];if math.abs(g.x-b.x)>.5 or math.abs(g.y-b.y)>.5 or math.abs(g.w-b.w)>.5 or math.abs(g.h-b.h)>.5 then keep[#keep+1]=g end end
+ return keep
+end
 function S.commas(n)local s=string.format("%.0f",n or 0);local r=s:reverse():gsub("(%d%d%d)","%1,"):reverse();return (r:gsub("^,",""))end
 function S.clock(s)s=math.max(0,math.floor(s));return string.format("%d:%02d",math.floor(s/60),s%60)end
 -- a name cut to n characters, never through the middle of one

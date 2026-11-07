@@ -21,25 +21,11 @@ function F.sample(mod,tracker,players,clock)
     local m=tracker.mission
     if not m or m.context.difficulty=="psykhanium" or m.context.difficulty=="TEST ONLY" then return end
     local stats=m.field_improvisation
-    if not stats then stats={veterans={},started=clock}end
+    if not stats then stats={veterans={}}end
     m.field_improvisation=stats
-    local entries,unknown={},false
     for _,player in pairs(players or {}) do
-        local entry,state=F.inspect(player)
-        if state=="unknown" then unknown=true end
-        if entry then entries[#entries+1]=entry
-            if stats.veterans[entry.id]==nil then stats.veterans[entry.id]={has=entry.has};tracker.dirty=true end
-        end
-    end
-    if clock-stats.started<2 or #entries==0 then return end
-    table.sort(entries,function(a,b)return a.id<b.id end)
-    local signature,has={},false
-    for _,entry in ipairs(entries) do signature[#signature+1]=entry.id..":"..tostring(entry.has);has=has or entry.has end
-    if unknown and not has then return end
-    local key=table.concat(signature,"|")
-    if key~=stats.notice then
-        if mod:get("field_improvisation_chat")==true then mod:echo(has and "Field Improvisation: registered" or "Field Improvisation: missing")end
-        stats.notice=key;tracker.dirty=true
+        local entry=F.inspect(player)
+        if entry and stats.veterans[entry.id]==nil then stats.veterans[entry.id]={has=entry.has};tracker.dirty=true end
     end
 end
 return F

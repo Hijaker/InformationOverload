@@ -49,11 +49,14 @@ return function(mod,api,C,deps)
         m.completion_markers=m.completion_markers or {};m.completion_markers[key]=m.completion_markers[key]or t
         if Timing then invoke(Timing.mark,m,key)end
     end
+    -- a match joined late never sees its own start, so its clock is the server's, less the 7 seconds in that a match starts on it when its intro is seen
     C.timer_seconds=function(self)
         local m=api.tracker().mission
-        if not m or not m.timing_origin or m.context.difficulty=="psykhanium"then return end
+        if not m or m.context.difficulty=="psykhanium"then return end
+        local origin=m.timing_origin;if origin==nil and not m.full and m.timing_diagnostics and m.timing_diagnostics.clock_sync then origin=7 end
+        if not origin then return end
         local marks=m.completion_markers or {};local boss=mod.io_display_options and (mod.io_display_options()or {}).boss_map_timing;local stop=boss and marks.boss_death or marks.victory_request or marks.victory_transition or marks.outro_start
-        local now=stop or mission_time();return now and math.max(0,now-m.timing_origin)
+        local now=stop or mission_time();return now and math.max(0,now-origin)
     end
     function Mission:observe_context(c)
         -- Mission identity is the manager instance, not a name that may repeat.

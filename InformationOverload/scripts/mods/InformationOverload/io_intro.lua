@@ -13,7 +13,7 @@ local PIN_SAY={"See this pin? Use it to make the menu stay expanded or not."}
 local GLYPHS="0123456789ABCDEF#$%&*+=<>?/|"
 -- centre and size of the cog as it talks: on Screens it stays in its slot and its words run in one line along the foot of the menu,
 -- then it hovers just above the pin, its one line to the right of it over the Back row
-local TALK,SLOT,PIN={660,305,206},{44,808,20},{44,-26,48}
+local TALK,SLOT,PIN={660,305,206},{44,808,23},{44,-26,48}
 local FOOT={16,842,1290,44}
 local I={PAGES=PAGES,SCREENS_SAY=SCREENS_SAY,REPLY=REPLY,PIN_SAY=PIN_SAY,TALK=TALK,SLOT=SLOT,PIN=PIN,FOOT=FOOT};I.__index=I
 -- the logo's own baked samples as rects, a run repeated down the rows kept as one

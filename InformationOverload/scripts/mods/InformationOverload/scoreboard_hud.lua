@@ -28,7 +28,7 @@ return function(mod,collectors,api)
  -- a mission counts with the scoreboard off too, so the key keeps its tap and hold there rather than opening the panel on the press
  function SB.in_mission()return live_mission()or SB.finished()~=nil end
  -- what a hold shows where the key is pressed, "off" for nothing: on the end screen (fin) its own choices, in a mission the squad's layout or else the Tracker Panel alone
- function SB.hold_layout(fin)local o=SB.options();if fin then return (board_on()and o.end_layout~="off"or tracker_on()and o.this_mission)and "end"or "off"end;if board_on()and o.layout~="off"then return o.layout end;return tracker_on()and o.this_mission and "tm"or "off"end
+ function SB.hold_layout(fin)local o=SB.options();if fin then return (board_on()and o.end_layout~="off"or tracker_on()and o.end_tm)and "end"or "off"end;if board_on()and o.layout~="off"then return o.layout end;return tracker_on()and o.this_mission and "tm"or "off"end
  -- what a tapped-on scoreboard belongs to: the live mission, or its end screen, so it goes off when the mission ends
  function SB.context()if live_mission()then return api.tracker().mission end;return SB.finished()end
  -- its saved run, the last in its history if that is this mission, or this mission merged with its part before a rejoin
@@ -93,7 +93,7 @@ return function(mod,collectors,api)
  function pen:text(s,x,y,w,h,size,c,align,font)Renderer.draw_text(self.r,tostring(s),math.max(1,size*self.k),font or D.font.body,Vector3(x,y,self.z+4),Vector2(w,h),c,ALIGN[align or "left"])end
  function pen:texture(m,x,y,w,h,c)if Renderer.draw_texture then Renderer.draw_texture(self.r,m,Vector3(x,y,self.z+3),Vector2(w,h),c)end end
  -- a text's width in UI units, measured at the font size it is drawn at
- function pen:width(s,size,font)local ok,w=pcall(Renderer.text_size,self.r,s,font or D.font.body,math.max(1,size*self.k));if ok and type(w)=="number"then return w/self.k end;return #s*size*.5 end
+ function pen:width(s,size,font)local ok,w,_,_,caret=pcall(Renderer.text_size,self.r,s,font or D.font.body,math.max(1,size*self.k));if ok and type(w)=="number"then return D.advance(w,caret)/self.k end;return #s*size*.5 end
  -- the game's Tab overlay on a HUD while it shows, and the difficulty icon its mission block holds
  local function overlay(hud)local e=type(hud)=="table"and hud.element and hud:element("HudElementTacticalOverlay");if e and (e._active or (e._alpha_multiplier or 0)>0)then return e end end
  local ICONS={}
@@ -102,29 +102,53 @@ return function(mod,collectors,api)
   ICONS.difficulty=d and d.visible~=false and d.content and d.content.difficulty_icon or nil
   return ICONS
  end
- -- how far down the Tab overlay's Special Condition reaches, its description's wrap kept until the text changes
+ -- how far down the Tab overlay's Special Condition reaches, the HUD's own wrap of its description kept until the text changes; text and measure
+ -- stand in for the overlay's text and the HUD's measure where the overlay has not shown yet, and leave the HUD's kept wrap alone
  local wrap={}
- local function below(e,sw,sh)
+ local function below(e,sw,sh,text,measure)
   local w=e._widgets_by_name or {};local c=w.circumstance_info
   if e._havoc_data then local ok,size=pcall(e.scenegraph_size,e,"circumstance_info_panel");return ok and size and S.below(sw,sh,nil,size[2])or nil end
   if not (c and c.visible and c.content and c.style and c.style.circumstance_description)then return end
-  local text,st=c.content.circumstance_description,c.style.circumstance_description
-  if wrap.text~=text then wrap.text=text;wrap.lines=S.lines(text,st.size and st.size[1]or 525,function(s)return pen:width(s,st.font_size or 24,st.font_type)end)end
+  local st=c.style.circumstance_description;local width=st.size and st.size[1]or 525
+  if measure then return S.below(sw,sh,S.lines(text,width,function(s)return measure(nil,s,st.font_size or 24,st.font_type)end))end
+  text=c.content.circumstance_description
+  if wrap.text~=text then wrap.text=text;wrap.lines=S.lines(text,width,function(s)return pen:width(s,st.font_size or 24,st.font_type)end)end
   return S.below(sw,sh,wrap.lines)
  end
+ -- where the HUD last put an unmoved squad under the Tab overlay, kept for the Move screen
+ local seen
+ -- For the Move screen in a mission: how far down an unmoved squad starts under the Special Condition with the Tab overlay up, as the HUD last
+ -- placed it, or before the overlay has shown from the condition's own text, measure measuring as measure(_,text,size,font); nil for no lower.
+ function SB.tab_below(sw,sh,measure)
+  if not live_mission()then return end;local m=api.tracker().mission
+  if seen and seen.m==m and seen.sw==sw and seen.sh==sh then return seen.b end
+  local ui=Managers.ui;local hud=ui and ui._hud;local ok,e=pcall(function()return hud:element("HudElementTacticalOverlay")end);if not ok or not e then return end
+  if e._havoc_data then return below(e,sw,sh)end
+  local cm=Managers.state and Managers.state.circumstance;local ok2,name=pcall(function()return cm:circumstance_name()end)
+  local ok3,tpl=pcall(function()return require("scripts/settings/circumstance/circumstance_templates")[name]end)
+  local key=ok2 and ok3 and type(tpl)=="table"and tpl.ui and tpl.ui.description;if type(key)~="string"or type(Localize)~="function"then return end
+  return below(e,sw,sh,Localize(key),measure)
+ end
  -- esc says the Esc menu is up: its Tracker Panel is drawn at its own place, and a squad held over it starts under that
- local function body(renderer,z,squad_too,tm_too,esc,layout,tab)
+ -- fin, the end screen: the squad lines up with the game's currency boxes and the Tracker Panel rests above it, drawn or not
+ local function body(renderer,z,squad_too,tm_too,esc,layout,tab,fin)
   local sb,seconds=SB.live();if not sb then return end
   local o=SB.options();layout=layout or o.layout;local k=renderer.scale or RESOLUTION_LOOKUP.scale or 1;local sw,sh=RESOLUTION_LOOKUP.width/k,RESOLUTION_LOOKUP.height/k
   pen.r,pen.z,pen.k=renderer,z,k
-  if tm_too and tab then local x,y,f,cats=S.tab_slot(sw,sh,get);W.tab(pen,x,y,sb.tm,seconds,f,cats,icons(tab))
-  elseif tm_too then local w,h=S.size("tm",nil,nil,S.record(sb.tm,seconds)~=nil);local x,y=S.place(esc and "tm_esc"or "tm",get,sw,sh,w,h);W.tm(pen,x,y,sb.tm,seconds)end
-  if squad_too and #sb.squad>0 then local extra=o.extra and S.EXTRA[layout]==true;local w,h=S.size("squad",layout,#sb.squad,nil,extra)
-   local x,y,f=S.squad_place(get,sw,sh,w,h,esc,tab and below(tab,sw,sh),extra);W.squad(pen,layout,x,y,sb.squad,seconds,extra,f)end
+  local extra=o.extra and S.EXTRA[layout]==true;local w,h=S.size("squad",layout,math.max(1,#sb.squad),nil,extra);local x,y,f
+  if fin then x,y,f=S.end_place(get,sw,sh,w,h,layout,extra)end
+  if tm_too and tab then local tx,ty,tf,cats=S.tab_slot(sw,sh,get);W.tab(pen,tx,ty,sb.tm,seconds,tf,cats,icons(tab))
+  elseif tm_too then local tw,th=S.size("tm",nil,nil,S.record(sb.tm,seconds)~=nil);local tx,ty
+   -- placed as if at its tallest, so a best-clear line coming or going never moves it
+   if fin then tx,ty=S.end_tm_place(sw,x,y,w*f,tw,th)else tx,ty=S.place(esc and "tm_esc"or "tm",get,sw,sh,tw,select(2,S.size("tm",nil,nil,true)))end;W.tm(pen,tx,ty,sb.tm,seconds)end
+  if squad_too and #sb.squad>0 then
+   if not fin then local b=tab and below(tab,sw,sh);if tab then seen={m=api.tracker().mission,sw=sw,sh=sh,b=b or nil}end;x,y,f=S.squad_place(get,sw,sh,w,h,esc,b,extra)end
+   W.squad(pen,layout,x,y,sb.squad,seconds,extra,f)
+  end
  end
- local function draw(renderer,z,squad_too,tm_too,esc,layout,tab)
+ local function draw(renderer,z,squad_too,tm_too,esc,layout,tab,fin)
   if not ALIGN then local v=Gui.VerticalAlignCenter;ALIGN={left={horizontal_alignment=Gui.HorizontalAlignLeft,vertical_alignment=v},right={horizontal_alignment=Gui.HorizontalAlignRight,vertical_alignment=v},center={horizontal_alignment=Gui.HorizontalAlignCenter,vertical_alignment=v}}end
-  local ok,err=pcall(body,renderer,z,squad_too,tm_too,esc,layout,tab)
+  local ok,err=pcall(body,renderer,z,squad_too,tm_too,esc,layout,tab,fin)
   if not ok then fail(err)end
  end
  -- the bests are worked out on the mission's first HUD frame, not the first time the key is held
@@ -180,9 +204,9 @@ return function(mod,collectors,api)
  function SB.over_end(renderer,name)
   if broken or not renderer or not on()then return end
   local ui=Managers.ui;if not ui or ui:active_top_view()~=name or not S.held(SB.state,os.clock(),SB.finished())then return end
-  local o=SB.options();local squad,tm=board_on()and o.end_layout~="off",tracker_on()and o.this_mission
+  local o=SB.options();local squad,tm=board_on()and o.end_layout~="off",tracker_on()and o.end_tm
   if not squad and not tm then return end
-  draw(renderer,200,squad,tm,false,o.end_layout)
+  draw(renderer,200,squad,tm,false,o.end_layout,nil,true)
  end
  return SB
 end

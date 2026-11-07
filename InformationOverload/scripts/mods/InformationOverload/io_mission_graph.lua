@@ -32,9 +32,9 @@ local function keeper(cat)
  return function(e,s)local k=TeamDamage.category({profile=s.profiles and s.profiles[e[4]],category=s.attack_types and s.attack_types[e[5]]})
   if cat=="dot"then return k:sub(1,4)=="dot_"end;return k==cat end
 end
-local function build(tl,width,keep)
- local rows,spans,i0,t1={},{},0,0
- for si,b in ipairs(Timeline.buckets(tl,width,keep))do local s=tl.segments[si];local o=b.origin_ms
+local function build(tl,width,keep,shift)
+ local rows,spans,i0,t1={},{},(shift or 0)>0 and -1 or 0,0
+ for si,b in ipairs(Timeline.buckets(tl,width,keep,shift))do local s=tl.segments[si];local o=b.origin_ms
   for _,r in ipairs(b.rows)do local row=rows[r.index]or {rep=0,use=0};rows[r.index]=row;row.rep=row.rep+r.reported;row.use=row.use+r.useful;i0=math.min(i0,r.index);t1=math.max(t1,(r.index+1)*width)end
   local iv=type(s.intervals)=="table"and #s.intervals>0 and s.intervals or {{s.start_ms,s.last_ms}}
   for _,v in ipairs(iv)do spans[#spans+1]={(v[1]-o)/1000,(v[2]-o)/1000}end
@@ -42,7 +42,7 @@ local function build(tl,width,keep)
  end
  local n=math.max(1,math.ceil((t1-i0*width)/width));local seen={}
  for _,v in ipairs(spans)do local f=math.floor(v[1]/width);for i=math.max(i0,f),math.min(i0+n-1,math.max(f,math.ceil(v[2]/width)-1))do seen[i]=true end end
- local out={width=width,t0=i0*width,t1=(i0+n)*width,n=n,i0=i0,rep=0,use=0,vmax=1,bars={}}
+ local sh=(shift or 0)/1000;local out={width=width,t0=i0*width+sh,t1=(i0+n)*width+sh,n=n,i0=i0,rep=0,use=0,vmax=1,bars={}}
  for k=1,n do local i=i0+k-1;local r=rows[i]
   if r then out.bars[k]=r;out.rep=out.rep+r.rep;out.use=out.use+r.use;out.vmax=math.max(out.vmax,r.rep)elseif seen[i]then out.bars[k]={rep=0,use=0}end
  end
@@ -69,11 +69,13 @@ function G.series(run,width,cat)
   for i,s in ipairs(use)do if s.mission_origin_ms~=o then use[i]=setmetatable({mission_origin_ms=o},{__index=s})end end
   local data={segments=use}
   local keep=keeper(cat);local bk="best"..tostring(cat or "total")
-  local ok,s=pcall(function()local s=build(data,width,keep);if s.rep<=0 then return false end
-   if not c.events then c.events=events(data,o,boss)end
+  -- the best ten seconds first, so a bucket starts where it does and holds it whole, the tallest of them, rather than cutting it in two
+  local ok,s=pcall(function()
    if c[bk]==nil then local b=Timeline.best_window(data,10,keep);local seg=b.segment and use[b.segment]
-    c[bk]=b.damage>0 and seg and {damage=b.damage,t1=(b.last_ms-seg.mission_origin_ms)/1000}or false end
-   s.events,s.best=c.events,c[bk];return s end)
+    c[bk]=b.damage>0 and seg and {damage=b.damage,from=b.first_ms-seg.mission_origin_ms,t0=(b.first_ms-seg.mission_origin_ms)/1000}or false end
+   local best=c[bk];local s=build(data,width,keep,best and best.from%(width*1000)or 0);if s.rep<=0 then return false end
+   if not c.events then c.events=events(data,o,boss)end
+   s.events,s.best=c.events,best;return s end)
   if not ok then c.broken=true;mod:error("I/O mission graph: %s",tostring(s));return nil end;c[key]=s end
  return c[key]or nil
 end
@@ -152,7 +154,7 @@ function G.damage(view,cv,run,st,cur)
   local px,py,pw,ph=x+90,y+70,w-126,236;local top=frame(cv,s,px,py,pw,ph)
   local function X(t)return px+(t-s.t0)/(s.t1-s.t0)*pw end;local function Y(v)return py+ph-math.min(1,v/top)*ph end
   gaps(cv,s,X,py,ph)
-  if s.best then local a,b=math.max(px,X(s.best.t1-10)),math.min(px+pw,X(s.best.t1));cv:rect(a-4,py+1,b-a+8,ph-2,BEST)
+  if s.best then local a,b=math.max(px,X(s.best.t0)),math.min(px+pw,X(s.best.t0+10));cv:rect(a-4,py+1,b-a+8,ph-2,BEST)
    -- the label sits right of the band, or left of it when the band is near the plot's end
    if b+210<=px+pw then cv:text("Best 10 Seconds",b+10,py+4,200,18,13,C.gold,"left",F.medium)else cv:text("Best 10 Seconds",a-210,py+4,200,18,13,C.gold,"right",F.medium)end end
   local bw=pw/s.n;local prev

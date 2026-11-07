@@ -1,6 +1,7 @@
 -- Information Overload: the Mission Board screen, a briefing on the map you hover.
 return function(mod,api,collectors)
  local base="InformationOverload/scripts/mods/InformationOverload/"
+ local D=mod:io_dofile(base.."io_view_definitions")
  local M={id="board",name="Mission Board",place="Mourningstar",icon="board",rows={
   {key="board_briefing",label="Map Briefing",help="Hovering a mission shows your record on its map over the mission details.",kind="toggle",default=true},
   {key="board_briefing_downs",label="What Downs You Here",help="What has downed you on that map, in the briefing.",kind="toggle",default=true},
@@ -40,8 +41,8 @@ return function(mod,api,collectors)
   local memo={}
   Renderer=Renderer or require("scripts/managers/ui/ui_renderer")
   return function(s,size,font)local key=font..size..s;local w=memo[key];if w then return w end
-   local ok,v=pcall(Renderer.text_size,renderer,s,font,size*M.UI*M.PITCH)
-   if ok and type(v)=="number"then w=v/M.UI else w=select(2,s:gsub("[^\128-\191]",""))*size*.555 end
+   local ok,v,_,_,caret=pcall(Renderer.text_size,renderer,s,font,size*M.UI*M.PITCH)
+   if ok and type(v)=="number"then w=D.advance(v,caret)/M.UI else w=select(2,s:gsub("[^\128-\191]",""))*size*.555 end
    memo[key]=w;return w end
  end
  local TINT={0,0,0,0}

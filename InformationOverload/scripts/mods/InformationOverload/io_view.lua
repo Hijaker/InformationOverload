@@ -17,11 +17,14 @@ local View=class("InformationOverloadView","BaseView")
 local NAMES={run="Match History",overview="Overview",last="Last Mission",history="Match History",trends="Trends",records="Records",weapons="Weapons",classes="Classes",
  streaks="Streaks",deaths="Deaths",speed="Speedrunning",dossier="Dossier",team="Team",friends="Friends",psyk="Psykhanium",scoreboard="Scoreboard",settings="Settings"}
 local ORDER={"overview","last","history","trends","records","weapons","classes","streaks","deaths","speed","dossier","team","friends","psyk"}
-local PARTS={{"display","Display"},{"counting","Counting"},{"chat","Chat"},{"data","Data"}}
+local PARTS={{"display","Display"},{"counting","Counting"},{"tracked","Tracked Players","friends"},{"data","Data"}}
 local PART_NAMES={screens="Screens"};for _,p in ipairs(PARTS)do PART_NAMES[p[1]]=p[2]end;for _,s in ipairs(Screens.list)do PART_NAMES[s.id]=s.name end
 local LOCKED,SEP=D.rgba(169,191,153,.3),D.rgba(60,78,57,.75)
 local CREDITS={{"HijaKer","Data, Records, Tracking"},{"LilyMods","Interface & Layout"}}
+-- the tops of Settings' two groups, each under its heading
 local GROUPS={{"base",10},{"rail",12},{"drawer",40},{"popup",70}}
+-- a card that opens from anywhere on it glows gold on hover: a faint warm fill, a gold edge and rings fading outward
+local GLOW,CARD_HV={.45,.22,.1},{bg=D.rgba(221,183,99,.06),edge=C.gold,glow=C.gold}
 local function pressed(input,name)local ok,v=pcall(input.get,input,name);return ok and v==true end
 local function down(input,name)local ok,v=pcall(input.get,input,name);return ok and (v==true or type(v)=="number"and v>0)end
 local function get(k)return mod:get(k)end
@@ -75,8 +78,8 @@ function View:_refresh()
 end
 function View:_w(text,size,font)
  text=tostring(text):gsub("{#[^}]*}","")
- local ok,w=pcall(self._text_size,self,text,{font_type=font or F.body,font_size=size},{2000,200},true)
- if ok and type(w)=="number"and w>0 then return w end
+ local ok,w,_,_,caret=pcall(self._text_size,self,text,{font_type=font or F.body,font_size=size},{2000,200},true)
+ if ok and type(w)=="number"and w>0 then return D.advance(w,caret)end
  return #text*size*.52
 end
 -- text cut to a width with an ellipsis, a whole character at a time
@@ -158,7 +161,7 @@ function View:_rail()
  if self.page=="settings"then
   -- Settings stacks up from the cog, which stays in its place lit as the selected slot and closes Settings; Screens heads the bar, and the pin sits above the bar on its own.
   entries[1]={key="settings",label="Close Settings",top=788,sel=true,away=intro and intro.away,fn=function()self:_close_settings()end}
-  for i,p in ipairs(PARTS)do local id=p[1];entries[#entries+1]={key=id,label=p[2],top=788-i*44,sel=self.part==id,fn=function()self.part=id end}end
+  for i,p in ipairs(PARTS)do local id=p[1];entries[#entries+1]={key=id,icon=p[3],label=p[2],top=788-i*44,sel=self.part==id,fn=function()self.part=id end}end
   entries[#entries+1]={key="screens",label="Screens",top=68,sel=self.part=="screens",fn=function()self.part="screens"end}
   entries[#entries+1]={sep=true,top=114}
   -- each screen's tab stays locked until the screen is turned on in Screens
@@ -260,6 +263,8 @@ end
 function View:_icon(cv,key,x,y,c)
  if key=="classes"then local pl=Managers.player:local_player(1);local pr=pl and pl:profile();local path=pr and pr.archetype and pr.archetype.archetype_icon_large
   if path and Application.can_get_resource("material",path)then return cv:texture(path,x-2,y-2,24,24,c,true)end end
+ -- I/O's logo, on Settings, fills its square 15% more than the other icons, about the same middle
+ if key=="settings"then return cv:icon(Icons.settings,x-1.5,y-1.5,c,nil,23)end
  if Icons[key]then return cv:icon(Icons[key],x,y,c)end
  local path=D.icons[key]
  if path and (not D.icon_held(path)or mod.io_icons_ready and mod.io_icons_ready())then cv:texture(path,x,y,20,20,c,true)end
@@ -317,9 +322,10 @@ function View:_render()
   rows[#rows+1]={y=e.top,h=40,rc=rc,dc=dc,key=e.key}
  end
  if settings then
-  local dc=D.canvas();dc.cx=drawer.cx
-  -- the credits sit side by side at the foot of the gap, just above Data, under Made By and a short rule; a role too wide for its half wraps
-  local lo=788-#PARTS*44;local half=216/#CREDITS;local roles,n={},1
+  local function piece(y,h,draw)local dc=D.canvas();dc.cx=drawer.cx;draw(dc);rows[#rows+1]={y=y,h=h,dc=dc}end
+  -- the credits at the foot of the gap above Data, across the names: the names side by side, a role too wide for its half wrapping
+  local cx,cw=-208,216
+  local half=cw/#CREDITS;local roles,n={},1
   for i,c in ipairs(CREDITS)do local lines,line={},""
    for word in c[2]:gmatch("%S+")do local try=line==""and word or line.." "..word
     if line~=""and self:_w(try,12,F.medium)>half-8 then lines[#lines+1]=line;line=word else line=try end end
@@ -329,12 +335,12 @@ function View:_render()
   for i,c in ipairs(CREDITS)do if n==2 and #roles[i]==1 then local w={};for word in c[2]:gmatch("%S+")do w[#w+1]=word end
    local best,at=math.huge;for k=1,#w-1 do local m=math.max(self:_w(table.concat(w," ",1,k),12,F.medium),self:_w(table.concat(w," ",k+1),12,F.medium));if m<best then best,at=m,k end end
    if at then roles[i]={table.concat(w," ",1,at),table.concat(w," ",at+1)}end end end
-  local h=16+4+1+12+20+n*15;local y0=lo-12-h;local y=y0
-  dc:text("Made By",-208,y,216,16,12,C.muted,"center",F.medium);y=y+20;dc:rect(-178,y,156,1,C.corner);y=y+13
-  for i,c in ipairs(CREDITS)do local x=-208+(i-1)*half;dc:text(c[1],x,y,half,20,15,C.value,"center")
-   for j,l in ipairs(roles[i])do dc:text(l,x,y+20+(j-1)*15,half,15,12,C.muted,"center",F.medium)end
-  end
-  rows[#rows+1]={y=y0,h=h,dc=dc}
+  local y0=788-#PARTS*44-12-(20+n*15)
+  piece(y0,20+n*15,function(dc)
+   for i,c in ipairs(CREDITS)do local x=cx+(i-1)*half;dc:text(c[1],x,y0,half,20,15,C.value,"center")
+    for j,l in ipairs(roles[i])do dc:text(l,x,y0+20+(j-1)*15,half,15,12,C.muted,"center",F.medium)end
+   end
+  end)
  end
  self:_ctl(base,"base",1258,20,34,34,function()Managers.ui:close_view(self.view_name,true)end)
  base:cross(1275,37,17,2,C.value)
@@ -343,7 +349,11 @@ function View:_render()
   self:_ctl(base,"base",22,20,44,34,function()self.pinned=not on;mod:set("rail_pinned",self.pinned);return true end,{sel=on})
   self:_icon(base,"pin",34,27,on and C.gold_hi or C.label)
  end
- base:text("v"..tostring(mod.version or ""),1004,838,300,17,14,C.muted,"right")
+ -- under the page at the right, the credits beside the version: the names lit, the rest muted, a small dot before the version
+ do local line={{"Made By",C.muted,F.medium},{CREDITS[1][1],C.value},{"&",C.muted,F.medium},{CREDITS[2][1],C.value},false,{"v"..tostring(mod.version or ""),C.muted}}
+  local ws,x={},1304;for i,s in ipairs(line)do ws[i]=s and self:_w(s[1],14,s[3])or 3;x=x-ws[i]-(i>1 and (s==false or line[i-1]==false)and 8 or i>1 and 4 or 0)end
+  for i,s in ipairs(line)do if s then base:text(s[1],x,838,ws[i]+2,17,14,s[2],"left",s[3])else base:rect(x,845,3,3,C.muted)end;x=x+ws[i]+(line[i+1]==nil and 0 or (s==false or line[i+1]==false)and 8 or 4)end
+ end
  self.io_crumbs_shown,self.io_crumbs_page,self.io_crumbs=self.io_crumbs,self.io_crumbs_drawn,nil;self.io_crumbs_drawn=self.page
  if shell then
   if intro.phase=="talk"then self:_ctl(base,"base",1168,20,80,34,function()intro:skip()end);base:text("Skip",1168,20,80,34,16,C.value,"center")end
@@ -388,24 +398,42 @@ function View:_render_move()
  for _,l in ipairs(S.LAYOUTS)do if l[1]==layout then label=l[2]end end
  local sb=mod.io_scoreboard;local live=sb and sb.live and sb.live();local n=live and #live.squad>0 and #live.squad or 4
  local kind=S.KEYS[self.io_move]and self.io_move or "squad"
- local cv=D.canvas();self.io_boxes={};local esc=kind=="tm_esc";self.io_kinds={kind}
+ local prev=self.io_boxes and self.io_boxes[kind];local cv=D.canvas();self.io_boxes={};local esc=kind=="tm_esc";self.io_kinds={kind}
  cv.z=0;cv:rect(-ox,-oy,sw,sh,D.rgba(0,0,0,.35))
  -- a faint stand-in for the Esc menu's own buttons
  if esc then local m=S.ESC_MENU;local mx,my=S.canvas(m[1],m[2],sw,sh);mx,my=mx-ox,my-oy
   cv.z=1;cv:rect(mx,my,m[3],m[4],C.card);cv.z=2;cv:edges(mx,my,m[3],m[4],1,C.line);cv:text("Esc Menu",mx,my+m[4]/2-20,m[3],40,24,C.muted,"center",F.title)end
  do
-  -- the held Tracker Panel's box is the size it shows at with the Tab overlay up
-  local w,h=S.size(kind,layout,n,true,o.extra);if kind=="tm"then w,h=select(5,S.tab_slot(sw,sh,get))end
-  local x,y=S.place(kind,get,sw,sh,w,h);local d=self.io_drag;local on=d and d.kind==kind
-  if on then x,y=d.x,d.y end;self.io_boxes[kind]={x=x,y=y,w=w,h=h}
-  x,y=x-ox,y-oy;local c=on and C.gold or C.frame
+  -- the box and its outlines are read as the HUD reads them, a drag's place standing in for the saved one once it moves, so each lands where it would draw
+  local d=self.io_drag;local on=d and d.kind==kind and prev;local at=get
+  if on and d.moved then local k,fx,fy=S.KEYS[kind],S.fraction(d.x,d.y,sw,sh,prev.w,prev.h);at=function(key)if key==k[1]then return fx end;if key==k[2]then return fy end;return get(key)end end
+  local key=get("dashboard_key");local tab_key=key==nil or type(key)=="table"and key[1]=="tab"and key[2]==nil
+  local below=kind=="squad"and sb and sb.tab_below and sb.tab_below(sw,sh,function(_,s,size,font)return self:_w(s,size,font)end)
+  local list=S.move_boxes(kind,o,tab_key,layout,n,sw,sh,at,below);local b=list[1]
+  self.io_boxes[kind]=b;self.io_ghosts={}
+  -- a Tracker Panel's bottom 50 holds the best-clear line, there only with a best clear here
+  local function strip(x,y,w,h)cv:rect(x,y+h-50,w,1,C.line);cv:text("Shows With A Best Clear",x,y+h-50,w,50,14,C.muted,"center",F.medium)end
+  local x,y,w,h=b.x-ox,b.y-oy,b.w,b.h;local c=on and C.gold or C.frame
   cv.z=1;cv:rect(x,y,w,h,C.panel);cv.z=2;cv:edges(x,y,w,h,2,c);cv:corners(x-1,y-1,w+2,h+2,on and C.gold or C.corner)
-  cv:text(kind=="squad"and label or "Tracker Panel",x,y+h/2-36,w,40,28,C.gold,"center",F.title);cv:text("Drag to move it.",x,y+h/2+6,w,26,16,C.label,"center",F.medium)
+  local mid=y+(b.strip and h-50 or h)/2
+  cv:text(kind=="squad"and label or "Tracker Panel",x,mid-36,w,40,28,C.gold,"center",F.title);cv:text("Drag to move it.",x,mid+6,w,26,16,C.label,"center",F.medium)
+  if b.strip then strip(x,y,w,h)end
+  -- where it shows instead, outlined: its best-clear strip and name drawn only where the box leaves them clear, a name with no room said under the instructions
+  local function clear(gy,gh,g)return gh>0 and not (g.x<b.x+b.w and b.x<g.x+g.w and gy<b.y+b.h and b.y<gy+gh)end
+  cv.z=3
+  for i=2,#list do local g=list[i];self.io_ghosts[#self.io_ghosts+1]=g;local gx,gy=g.x-ox,g.y-oy
+   cv:edges(gx,gy,g.w,g.h,1,C.hover)
+   local foot=g.y+g.h;if g.strip and clear(foot-50,50,g)then strip(gx,gy,g.w,g.h);foot=foot-50 end
+   local at_y=clear(foot-26,26,g)and foot-26 or clear(g.y+4,26,g)and g.y+4
+   if at_y then g.named=true;cv:text(g.label,gx,at_y-oy,g.w,22,14,C.label,"center",F.medium)end
+  end
  end
- local cx,ty=sw/2-ox,24-oy
- cv.z=3;cv:rect(cx-340,ty,680,96,C.pop);cv.z=4;cv:edges(cx-340,ty,680,96,1,C.hover)
+ local untold={};for _,g in ipairs(self.io_ghosts or {})do if not g.named then untold[#untold+1]=g.say end end
+ local cx,ty,ph=sw/2-ox,24-oy,#untold>0 and 112 or 96;local by=ty+ph-52
+ cv.z=3;cv:rect(cx-340,ty,680,ph,C.pop);cv.z=4;cv:edges(cx-340,ty,680,ph,1,C.hover)
  cv:text(esc and "Drag the Tracker Panel to where it should show beside the Esc menu."or kind=="tm"and "Drag the Tracker Panel to where it should show with the key held."or "Drag the squad to where it should show with the key held.",cx-330,ty+6,660,30,16,C.value,"center",F.medium)
- local function button(x,w,text,fn)self:_ctl(cv,"base",x,ty+44,w,36,fn);cv:text(text,x,ty+44,w,36,16,C.value,"center")end
+ if #untold>0 then cv:text((#untold>1 and "The outlines are where it shows "or "The outline is where it shows ")..table.concat(untold," and ")..".",cx-330,ty+34,660,22,14,C.label,"center",F.medium)end
+ local function button(x,w,text,fn)self:_ctl(cv,"base",x,by,w,36,fn);cv:text(text,x,by,w,36,16,C.value,"center")end
  button(cx-170,160,"Done",function()self.io_move=nil;self.io_drag=nil end)
  button(cx+10,160,"Reset",function()local k=S.KEYS[kind];mod:set(k[1],nil);mod:set(k[2],nil,true)end)
  local under,over=cv:widgets("io_base",10);self.layers={{g="base",z=10,under=under,over=over}}
@@ -444,7 +472,7 @@ function View:_crumbs(cv)
 end
 function View:_card(cv,x,y,w,h,title,sub,jump,click)
  cv.z=4;cv:rect(x,y,w,h,C.card);cv.z=5;cv:edges(x,y,w,h,1,C.frame);cv:corners(x-1,y-1,w+2,h+2,C.corner)
- if click then self:_hit("base",x,y,w,h,click,{bg=C.card_h,edge=C.hover})end
+ if click then self:_hit("base",x,y,w,h,click,CARD_HV)end
  local tw=self:_w(title,20);cv:text(title,x+36,y+11,tw+6,30,20,C.gold)
  if sub then cv:text(sub,x+46+tw,y+13,300,30,14,C.muted)end
  if jump then self:_jump(cv,x+8,y+15,jump)end
@@ -538,18 +566,15 @@ function View:_overview(cv,popup)
  end
  -- four cards of one size below, each with the same header, row height and arrow column on the right
  local y1=D.row2+TH+D.gap;local CH=(D.bottom-y1-D.gap)/2;local y2=y1+CH+D.gap
- local function card(x,y,title,sub,go,fn)self:_card(cv,x,y,W,CH,title,sub)
-  -- a card's button sits in its bottom right corner, clear of the rows
-  if go then local lw=self:_w(go,14)+35;local lx,by=x+W-13-lw,y+CH-39
-   self:_ctl(cv,"base",lx,by,lw,26,fn,{hv={bg=C.fill_s,edge=C.sel}});cv:text(go,lx+10,by,lw,26,14,C.value);cv:chevron(lx+lw-19,by+9,"right",8,C.value)end
- end
+ local function card(x,y,title,sub,fn)self:_card(cv,x,y,W,CH,title,sub,nil,fn)end
  local function rows(x,y,list,jump)
   for i,r in ipairs(list)do local ry=y+(i-1)*26
    if r[3]and jump then self:_hit("base",x+25,ry,W-38,26,function()jump(r[3])end,{bg=C.row_h});cv:chevron(x+W-26,ry+9,"right",8,C.muted)end
    cv:text(r[1],x+36,ry,W-200,26,16,C.label);cv:text(r[2],x+W-343,ry,300,26,16,C.value,"right")
   end
  end
- card(L,y1,"Last Mission",Overview.mode_names[m.last.mode]or mode,m.last.id and "Open",m.last.id and function()self.io_tab="overview";self:_go("last")end)
+ -- Last Mission and Recent Form have nothing to click inside, so each opens from anywhere on it
+ card(L,y1,"Last Mission",Overview.mode_names[m.last.mode]or mode,m.last.id and function()self.io_tab="overview";self:_go("last")end)
  rows(L,y1+45,m.last.rows)
  card(R,y1,"Personal Bests",mode)
  rows(R,y1+45,m.bests,open_run)
@@ -569,10 +594,7 @@ function View:_overview(cv,popup)
 end
 function View:_recent(cv,x,y,w,r,h)
  local n=#r.bars;h=h or 207
- self:_card(cv,x,y,w,h,"Recent Form",n>0 and "Last "..n..(n==1 and " Mission"or " Missions")or nil)
- local lw=self:_w("All Trends",14)+35;local lx=x+w-13-lw
- self:_ctl(cv,"base",lx,y+13,lw,26,function()self.io_trend_tab=nil;self:_go("trends")end,{hv={bg=C.fill_s,edge=C.sel}})
- cv:text("All Trends",lx+10,y+13,lw,26,14,C.value);cv:chevron(lx+lw-19,y+22,"right",8,C.value)
+ self:_card(cv,x,y,w,h,"Recent Form",n>0 and "Last "..n..(n==1 and " Mission"or " Missions")or nil,nil,function()self.io_trend_tab=nil;self:_go("trends")end)
  local x0,top,zone=x+25,y+49+20,h-133;local axis=top+zone
  local sw=n>0 and (w-38)/n or w-38;local bw=math.min(22,sw*.62);local max=0
  for _,b in ipairs(r.bars)do if b.damage and b.damage>max then max=b.damage end end
@@ -609,6 +631,10 @@ local function place(widget,hit)
  local s,hv,x,y,w,h=widget.style,hit.hv,hit.x,hit.y,hit.w,hit.h
  widget.visible=true;widget.io_group=hit.g
  paint(s.bg,x,y,w,h,hv.bg);paint(s.top,x,y,w,1,hv.edge);paint(s.bottom,x,y+h-1,w,1,hv.edge or hv.under);paint(s.left,x,y,1,h,hv.edge);paint(s.right,x+w-1,y,1,h,hv.edge)
+ -- a whole card glows: rings outside its edge, fading outward
+ if s.glow1t then for k=1,3 do local c=hv.glow and D.copy(hv.glow,GLOW[k])or nil
+  paint(s["glow"..k.."t"],x-k,y-k,w+2*k,1,c);paint(s["glow"..k.."b"],x-k,y+h+k-1,w+2*k,1,c);paint(s["glow"..k.."l"],x-k,y-k+1,1,h+2*k-2,c);paint(s["glow"..k.."r"],x+w+k-1,y-k+1,1,h+2*k-2,c)
+ end end
 end
 function View:_pointer(x,y,t)
  local span=self.rail_span;local was=self.drawer

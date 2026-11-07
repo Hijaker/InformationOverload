@@ -280,7 +280,7 @@ Use team records to revisit memorable runs, while checking the mission context b
 
 Friends brings together Steam friends and players you choose to track. It shows missions and wins together, class results, clutch records and the enemies responsible for their downs.
 
-To track someone, open a saved mission and choose **Track** next to their name. **Settings › Data › Tracked Players** also lets you manage tracked players and select from recent teammates. Steam friends are identified separately.
+To track someone, open a saved mission and choose **Track** next to their name. **Settings › Tracked Players** also lets you manage tracked players and select from recent teammates. Steam friends are identified separately.
 
 The tracking option in **Settings › Counting** controls keeping statistics for manually tracked players alongside Steam friends.
 
@@ -353,9 +353,7 @@ Mod Options contains dashboard/scoreboard keybinds and the switch for Psykhanium
 
 Choose how late-join, rejoined and early-leave missions contribute to records and streaks. Changes are recounted after returning to the Mourningstar. This can change the summaries without changing what originally happened in a saved mission.
 
-### Chat and recording
-
-The optional **Field Improvisation** message reports at mission start whether a Veteran in the squad has that talent. The line is shown only to you.
+### Recording
 
 **Burst Limiter Override** recording can be switched off if you do not want to collect that Ogryn proc information. Turning off an optional screen panel changes what is displayed; it is not a general switch that stops all mission recording.
 

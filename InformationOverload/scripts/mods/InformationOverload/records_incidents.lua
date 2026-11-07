@@ -171,18 +171,21 @@ function Records:complete_incidents(m)
     end
 end
 
-function Records:lethality_state(victim,class,personal,state,sources,replace)
+-- at, the mission's gameplay clock in milliseconds: kept for the down, and for the death
+function Records:lethality_state(victim,class,personal,state,sources,replace,at)
  local m=self.mission;if not m then return end;m.lethality_events=m.lethality_events or {};m.lethality_active=m.lethality_active or {}
  local index=m.lethality_active[victim];local e=index and m.lethality_events[index]
  if not e then e={victim=victim,class=class,personal=personal,outcome=state=="knocked_down" and "down" or "direct_death",sources=deep_copy(sources or {})};m.lethality_events[#m.lethality_events+1]=e;m.lethality_active[victim]=#m.lethality_events
  elseif state~="knocked_down" and e.outcome=="down" then e.outcome="down_to_death" end
  e.class=class or e.class
+ if type(at)=="number"then e.at=e.at or at;if state~="knocked_down"then e.died_at=e.died_at or at end end
  -- A cause seen after the event, as Perils after its down, takes the enemy's place.
  if replace then for i=#e.sources,1,-1 do if e.sources[i].group~="environment" then table.remove(e.sources,i) end end end
  if #e.sources==0 and sources and #sources>0 then e.sources=deep_copy(sources) end
  if sources and #sources>0 and sources[1].enemy~="unknown_cause" then for i=#e.sources,1,-1 do if e.sources[i].enemy=="unknown_cause" then table.remove(e.sources,i) end end end
  -- A later fall report can add the environmental overlap to an already observed down/death.
- for _,source in ipairs(sources or {}) do local found=false;for _,old in ipairs(e.sources)do if old.enemy==source.enemy then found=true end end;if not found then e.sources[#e.sources+1]=deep_copy(source) end end
+ -- an unknown cause never joins one already named
+ for _,source in ipairs(sources or {}) do local found=source.enemy=="unknown_cause"and #e.sources>0;for _,old in ipairs(e.sources)do if old.enemy==source.enemy then found=true end end;if not found then e.sources[#e.sources+1]=deep_copy(source) end end
  self.dirty=true
 end
 function Records:lethality_recovered(victim)

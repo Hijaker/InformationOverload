@@ -19,6 +19,12 @@ return function(mod, api, C, initial)
         poxwalker_explosion=true,poxwalker_explosion_close=true,poxwalker_explosion_mild=true,poxwalker_explosion_close_mild=true}
     local barrel_profiles={barrel_explosion=true,barrel_explosion_close=true,fire_barrel_explosion=true,fire_barrel_explosion_close=true,liquid_area_fire_burning_barrel=true}
     local environment_sources,fatal_hits={},{}
+    -- damage the game sends with no one behind it: fire and gas an enemy left, gone or not, and the Spillway Prophet's warp lightning and Upheaval and a
+    -- Trapper's net, named for the enemy they come from
+    local unowned={grenadier_liquid_fire_burning="fire",renegade_flamer_liquid_fire_burning="fire",cultist_flamer_liquid_fire_burning="fire",liquid_area_fire_burning="fire",
+        burning="fire",horde_flame_impact="fire",flamer_implosion="fire",cultist_grenadier_gas="gas",toxic_gas="gas",toxic_gas_mutator="gas",
+        toxin_variant_3="renegade_wizard",renegade_wizard_z_catapult="renegade_wizard",netted_tick="renegade_netgunner"}
+    local HAZARD={fire={enemy="fire",label="Fire"},gas={enemy="toxic_gas",label="Toxic Gas"}}
     local sample_cache={players=setmetatable({},{__mode="k"}),tick=0,next_refresh=0}
     local barrel_report
 
@@ -98,9 +104,21 @@ return function(mod, api, C, initial)
         local perils=detonated and C.clock-detonated<=2
         if perils then source={enemy="perils_of_the_warp",label="Perils Of The Warp",group="environment",deadline=C.clock+10};incap_sources[id]=source end
         local sources={};if source and (source.counted or source.deadline>=C.clock) then source.counted=true;sources[#sources+1]={enemy=source.enemy,label=source.label,group=source.group,horde_type=source.horde_type,attack_type=source.attack_type,subgroup=source.subgroup,attack_inferred=source.attack_inferred} end
-        local env=environment_sources[id];if env and env.deadline>=C.clock then sources[#sources+1]={enemy=env.enemy,label=env.label,group="environment"} end
+        local env=environment_sources[id];if env and (env.counted or env.deadline>=C.clock)then env.counted=true;sources[#sources+1]={enemy=env.enemy,label=env.label,group="environment"} end
         if #sources==0 then sources={{enemy="unknown_cause",label="Unknown cause",group="unknown"}} end
-        api.tracker():lethality_state(id,class,personal,state or "knocked_down",sources,perils)
+        local tm=Managers.time;local ok,at=pcall(function()return tm and (not tm.has_timer or tm:has_timer("gameplay"))and tm:time("gameplay")end)
+        api.tracker():lethality_state(id,class,personal,state or "knocked_down",sources,perils,ok and type(at)=="number"and math.floor(at*1000+.5)or nil)
+    end
+    -- the game reports the hit that downs or kills a few frames after the down itself, so a cause that comes that soon names a down or death still
+    -- unknown; a hit later than that lands on someone already down
+    local function just_down(victim)
+        local t,st=control_transitions[victim],control_states[victim]
+        return t and C.clock-t.at<=.25 and t.previous~="dead" and (st=="knocked_down" or st=="dead")and st or nil
+    end
+    local function late_cause(victim,unit)
+        local st=just_down(victim);if not st then return end
+        local m=api.tracker().mission;local i=m and m.lethality_active and m.lethality_active[victim];local e=i and m.lethality_events and m.lethality_events[i]
+        for _,s in ipairs(e and e.sources or {})do if s.enemy=="unknown_cause"then enemy_incapacitation(unit,st);return end end
     end
     local function combat_report(data)
         if not api.enabled() or type(data)~="table" then return end
@@ -132,18 +150,29 @@ return function(mod, api, C, initial)
                  saved.attack_inferred=saved.group=="normal"and (enemy=="cultist_assault"or enemy=="renegade_assault"or enemy=="renegade_rifleman")and not saved.attack_type or nil
                 end
             end
-        elseif fatal and not fall then
-            -- Only a hit that downs or kills replaces the last enemy, and a teammate's own hit is named as the cause.
+        elseif fatal and not fall and (id or name~="knocked_down_tick") then
+            -- Only a hit that downs or kills replaces the last enemy, and a teammate's own hit is named as the cause; bleeding out, the down's own ticks
+            -- that name no one, keeps the enemy who downed
             incap_sources[victim]=id and id~=victim and not blast_profiles[name] and not barrel_profiles[name] and {enemy="teammate",label="Teammate",group="environment",deadline=C.clock+10} or nil
         end
         if barrel_profiles[name] then environment_sources[victim]={enemy="barrels",label="Barrels",deadline=C.clock+10} end
+        local from=not b and not id and unowned[name]
+        -- the Prophet's lightning shares its damage with the flies of an Expedition
+        if from and name=="toxin_variant_3"then local gm=Managers.state and Managers.state.game_mode;local ok,mode=pcall(function()return gm:game_mode_name()end);if ok and mode=="expedition"then from=nil end end
+        -- fire or gas that downs, or lands as the down is seen, is the cause; a knock_down a buff survives leaves it only a moment
+        if from and HAZARD[from] and (fatal or (landed or type(amount)=="number"and amount>0)and just_down(victim))then local h=HAZARD[from];environment_sources[victim]={enemy=h.enemy,label=h.label,deadline=C.clock+2}
+        elseif from and not HAZARD[from] and (fatal or landed or type(amount)=="number"and amount>0) then local previous=incap_sources[victim]
+            if not (previous and previous.counted) then local group=from=="renegade_wizard"and "boss"or "special"
+                incap_sources[victim]={enemy=from,label=EnemyCatalog.name(from),group=group,subgroup=Grouping.classify(from,group,from=="renegade_netgunner",nil),deadline=C.clock+10} end
+        end
         local transition=control_transitions[victim]
         if blast_profiles[name] and (fatal or data.attack_result=="toughness_absorbed"or type(amount)=="number"and amount>0)then DepartureTracking.hit(m,victim,C.clock,name:find("poxwalker",1,true)and "Poxburster"or "Barrel")end
         if name=="chaos_plague_ogryn_charge"or name=="chaos_plague_ogryn_catapult"then DepartureTracking.hit(m,victim,C.clock,"Plague Ogryn")end
         local real_fall=tostring(data.damage_type or "")=="instakill"or name:find("damage_volume_instakill",1,true)or name:find("kill_volume",1,true)or name:find("fall",1,true) or tostring(data.damage_type or ""):find("fall",1,true) or name=="default" and fatal and (control_states[victim]=="falling"or control_states[victim]=="catapulted"or transition and (transition.previous=="falling"or transition.previous=="catapulted"))
         if real_fall and data.attack_result=="died"then DepartureTracking.fall_death(m,victim,C.clock)end
         if real_fall and not b and not (environment_sources[victim] and environment_sources[victim].deadline>=C.clock) then environment_sources[victim]={enemy="falls",label="Falls",deadline=C.clock+10} end
-        if name:find("poxwalker_explosion",1,true) then incap_sources[victim]={enemy="chaos_poxwalker_bomber",label="Poxburster",group="special",deadline=C.clock+10} end
+        if name:find("poxwalker_explosion",1,true)and not (incap_sources[victim]and incap_sources[victim].counted)then incap_sources[victim]={enemy="chaos_poxwalker_bomber",label="Poxburster",group="special",deadline=C.clock+10} end
+        if fatal or b and b.breed_type=="minion" or from then late_cause(victim,target) end
         -- knock_down also comes for a hit a resist-death buff survives, so a down is saved from its state.
         if data.attack_result=="died" then enemy_incapacitation(target,"dead") end
         local self_barrel=id and id==victim and barrel_profiles[name]
@@ -232,7 +261,8 @@ return function(mod, api, C, initial)
             if not (environment_sources[id] and environment_sources[id].deadline>=C.clock) then environment_sources[id]={enemy="falls",label="Falls",deadline=C.clock+10} end
             DepartureTracking.fall_death(m,id,C.clock)
         end
-        if (state=="knocked_down" or state=="dead" or state=="hogtied") and seen then enemy_incapacitation(unit,state) end
+        -- the game enters hogtied only on a respawn, after the death's cause was saved
+        if (state=="knocked_down" or state=="dead") and seen then enemy_incapacitation(unit,state) end
         if (state=="knocked_down" or state=="dead" or state=="hogtied") and previous~="knocked_down" and previous~="dead" and previous~="hogtied" then lethal_kick(unit) end
         if event and event~=state_events[previous] and seen then
             if personal and event~="died" then api.tracker():survival_event(event) end

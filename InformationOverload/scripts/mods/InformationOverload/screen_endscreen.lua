@@ -2,10 +2,11 @@
 return function(mod,api,collectors)
  local base="InformationOverload/scripts/mods/InformationOverload/"
  local Times=mod:io_dofile(base.."mission_times")
+ local Defs=mod:io_dofile(base.."io_view_definitions")
  local M={id="endscreen",name="End Screen",place="Mission",icon="endscreen",rows={
   {key="endscreen_time_records",label="Mission Time And Records",help="Your clear time and any records you set, under the squad.",kind="toggle",default=true},
   {key="endscreen_debrief",label="Mission Debrief",help="Hover the time and records for the mission's records, kills, damage and how it compares with your others.",kind="toggle",default=true},
-  {key="endscreen_debrief_downs",label="Downs And Deaths",help="Every down and death in the debrief, yours and your teammates', in the order they were recorded.",kind="toggle",default=true},
+  {key="endscreen_debrief_downs",label="Downs And Deaths",help="Every down and death in the debrief, yours and your teammates', at the time each happened.",kind="toggle",default=true},
  }}
  local defaults={};for _,r in ipairs(M.rows)do defaults[r.key]=r.default end
  local function on()return mod:is_enabled()and mod:get("screen_endscreen")~=false end
@@ -34,7 +35,7 @@ return function(mod,api,collectors)
  local LAB,HI,SHADE={255,164,186,167},{255,218,231,216},{242,0,0,0}
  local HINT,HINT_ON,HINT_PIN={255,118,124,119},{255,214,220,212},{255,238,216,164}
  local function width(view,s,size,cache,font)
-  local key=s..size..(font or "");if not cache[key]then local ok,w=pcall(view._text_size,view,s,{font_type=font or "proxima_nova_bold",font_size=size},{2000,200});cache[key]=ok and type(w)=="number"and w>0 and w or #s*size*.55 end
+  local key=s..size..(font or "");if not cache[key]then local ok,w,_,_,caret=pcall(view._text_size,view,s,{font_type=font or "proxima_nova_bold",font_size=size},{2000,200});cache[key]=ok and type(w)=="number"and w>0 and Defs.advance(w,caret)or #s*size*.55 end
   return cache[key]
  end
  local widths={}
@@ -172,7 +173,7 @@ return function(mod,api,collectors)
   local k=renderer.scale or RESOLUTION_LOOKUP.scale or 1;local sw,sh=RESOLUTION_LOOKUP.width/k,RESOLUTION_LOOKUP.height/k;local x=288
   if not ALIGN then local v=Gui.VerticalAlignCenter;ALIGN={left={horizontal_alignment=Gui.HorizontalAlignLeft,vertical_alignment=v},right={horizontal_alignment=Gui.HorizontalAlignRight,vertical_alignment=v},center={horizontal_alignment=Gui.HorizontalAlignCenter,vertical_alignment=v}}end
   local count=s and #s.list or 0;local hx,hy=x,sh-43
-  -- a mission joined late or picked up after a mods reload shows how long it was tracked, with a + for at least
+  -- a mission picked up after a mods reload, or joined late before the server's clock reached it, shows how long it was tracked, with a + for at least
   if times then local seconds=sb.final_seconds(f);local least=not seconds and sb.tracked_seconds and sb.tracked_seconds(f)
    if seconds or least then local y=sh-75;put(renderer,"Mission Time:",18,x,y,LAB,a,k);put(renderer,(seconds and Times.backend(s and s.run or f.m)and Times.format(seconds)or sb.S.clock(seconds or least))..(seconds and ""or "+"),24,x+width(view,"Mission Time:",18,widths)+7,y-2,HI,a,k)end
    if count>0 then local n=tostring(count);local word=count==1 and "Record"or "Records";local y=sh-43
@@ -192,8 +193,9 @@ return function(mod,api,collectors)
   end
   local sb=mod.io_scoreboard;if sb and sb.over_end then sb.over_end(renderer,name)end
  end
- -- Layout E: while the vote is up it sits on the line under Continue, its right edge on Continue's, and Rate Mission is always lifted to the screen's right edge above the skulls; with End Screen off the game's own layout is kept
- local LINE,GAP,LIFT_X,LIFT_Y=31,8,169.2,-129.6
+ -- Layout E: while the vote is up it sits on the line under Continue, its right edge on Continue's, and Rate Mission is always lifted to the screen's right edge, level with the XP bar; with End Screen off the game's own layout is kept
+ -- the XP bar's middle is 244 up from the screen's foot, and Rate Mission's title and thumbs, 12 to 78 down its 96, have theirs 51 up from its own
+ local LINE,GAP,LIFT_X,LIFT_Y=31,8,169.2,-(244-51)
  local function node(view,id,x,y,ha)
   local kept=view.io_kept;local n=view._ui_scenegraph[id];local p=n.position
   local o=kept[id]or {p[1],p[2],n.horizontal_alignment};kept[id]=o;if x==nil then x,y,ha=o[1],o[2],o[3]end

@@ -9,12 +9,15 @@ D.c={label=rgba(169,191,153),value=rgba(216,229,207),gold=rgba(221,183,99),gold_
  panel=rgba(4,7,5,.86),card=rgba(49,56,49,.26),card_h=rgba(67,75,64,.3),bad=rgba(205,120,96),line=rgba(60,78,57,.45),pop=rgba(10,14,10),on=rgba(83,72,48,.35),
  row_h=rgba(67,75,64,.45),axis=rgba(169,191,153,.4),dim=rgba(0,0,0,.63),grain=rgba(90,115,83,.094),tip=rgba(8,11,8,.96),none={0,0,0,0}}
 D.font={body="proxima_nova_bold",medium="proxima_nova_medium",title="machine_medium"}
+-- the game measures a text by its ink, short of the room around a narrow glyph such as 1, and a box only that wide draws nothing, so a text is as
+-- wide as its ink or its caret, where the next glyph would start, whichever is more
+function D.advance(w,caret)if caret==nil or not (Vector3 and Vector3.to_elements)then return w end;local x=Vector3.to_elements(caret);return type(x)=="number"and x>w and x or w end
 D.mat={grain="content/ui/materials/backgrounds/terminal_basic",frame="content/ui/materials/frames/frame_tile_2px"}
 local sys,opt="content/ui/materials/icons/system/escape/","content/ui/materials/icons/system/settings/"
 D.icons={overview=opt.."category_interface",last=sys.."leave_mission",history=sys.."news",trends=opt.."category_video",records=sys.."credits",
  weapons=sys.."inventory",classes=sys.."change_character",streaks=opt.."category_gameplay",deaths=sys.."quit",speed=opt.."category_controls",
  dossier=sys.."party_finder",team=sys.."social",friends=sys.."social_empty",psyk=sys.."leave_training",settings=sys.."settings",
- display=opt.."category_video",counting=opt.."category_gameplay",chat=sys.."social",data=opt.."category_interface"}
+ display=opt.."category_video",counting=opt.."category_gameplay",data=opt.."category_interface"}
 D.icon_held=function(path)return path:find(sys,1,true)==1 end
 D.panel_size={1320,860}
 D.left,D.right,D.width,D.col,D.col2,D.gap=100,1290,1190,590,700,10
@@ -22,9 +25,11 @@ D.top,D.row2,D.sheet,D.bottom=78,120,166,818
 function D.scenegraph()
  return {screen=Workspace.screen,panel={parent="screen",horizontal_alignment="center",vertical_alignment="center",size=D.panel_size,position={0,0,100}}}
 end
+-- a hover: its fill and edges, and three rings outside them for a whole card's glow
 function D.hover_definition()
- local passes={}
- for _,id in ipairs({"bg","top","bottom","left","right"})do passes[#passes+1]={pass_type="rect",style_id=id,style={color={0,0,0,0},offset={0,0,1},size={0,0}}}end
+ local passes,ids={},{"bg","top","bottom","left","right"}
+ for k=1,3 do for _,side in ipairs({"t","b","l","r"})do ids[#ids+1]="glow"..k..side end end
+ for _,id in ipairs(ids)do passes[#passes+1]={pass_type="rect",style_id=id,style={color={0,0,0,0},offset={0,0,1},size={0,0}}}end
  return UIWidget.create_definition(passes,"panel",{},D.panel_size,nil,{offset={0,0,20}})
 end
 local Canvas={};Canvas.__index=Canvas

@@ -838,7 +838,7 @@ end
 mod:command("io_reset", "Move all saved statistics into a backup, after a confirmation", mod.io_request_reset)
 mod:command("io_restore", "Bring back the latest backup, after a confirmation", function()mod.io_request_restore(false)end)
 
-mod.version="0.6.8-test.measurements.1"
+mod.version="1.0"
 
 
 -- Draft integration seam for the data interface; no UI/navigation changes.

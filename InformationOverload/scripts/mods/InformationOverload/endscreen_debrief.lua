@@ -49,6 +49,28 @@ local function personal(r)if not r.incidents and not r.lethality_events then ret
 local function disabled(p)return (p.pounces or 0)+(p.nets or 0)+(p.mutant_charges or 0)end
 local function typed(k)return {(k.horde_melee or 0)+(k.horde_ranged or 0),k.elite or 0,k.special or 0,k.boss or 0}end
 -- m is the mission just played and run its saved copy, if it was saved; the figures come from the saved run first
+-- the downs and deaths at their mission time, a down that ended in death at the death: every one by the time saved with it, or, in a match from
+-- before teammates' were saved, the player's own from the damage timeline's resets when it holds every one of them; gives the mission's length
+-- to measure them against, and whether everyone's is placed
+local function placed(src,ev)
+ local o=type(src.timing_origin)=="number"and math.floor(src.timing_origin*1000+.5)or 0
+ local tl=type(src.combat_timeline)=="table"and type(src.combat_timeline.segments)=="table"and src.combat_timeline or nil
+ local downs,deaths,last,stop={}, {}, {},0
+ for _,s in ipairs(tl and tl.segments or {})do if type(s)=="table"and type(s.last_ms)=="number"then stop=math.max(stop,(s.last_ms-o)/1000)end end
+ local all=#ev>0;for _,e in ipairs(ev)do if type(e.at)~="number"then all=false end end
+ if all then local most=stop;for _,e in ipairs(ev)do e.t=math.max(0,(e.at-o)/1000);most=math.max(most,e.t)end;if most>0 then return most,true end;for _,e in ipairs(ev)do e.t=nil end end
+ if not tl then return nil end
+ for _,s in ipairs(tl.segments)do if type(s)=="table"then
+  for _,e in ipairs(s.streak_events or {})do local k=e[3]=="reset"and (e[4]=="knocked_down"and downs or e[4]=="died"and deaths)
+   if k then local t=(e[1]-o)/1000;if not last[k]or t-last[k]>1 then k[#k+1]=t;last[k]=t end end end
+ end end
+ local di,xi,mine,ok=0,0,0,true
+ for _,e in ipairs(ev)do if e.you then mine=mine+1
+  if e.outcome=="down"then di=di+1;e.t=downs[di]elseif e.outcome=="down_to_death"then di=di+1;xi=xi+1;e.t=deaths[xi]else xi=xi+1;e.t=deaths[xi]end
+  if not e.t then ok=false end;stop=math.max(stop,e.t or 0)end end
+ if mine==0 or not ok or di~=#downs or xi~=#deaths or stop<=0 then for _,e in ipairs(ev)do e.t=nil end;return nil end
+ return stop
+end
 function B.model(tracker,m,run,seconds,basis,list,cls)
  local src=run or m;local c=src.context or m.context or {};local history=tracker.data.run_history or {}
  local M={won=run and run.victory==true or not run and m.completion_time~=nil,date=stamp(src.started_at),map=tracker:run_mission_name(c),diff=Overview.diff_label(c),time=seconds and (Times.backend(src)and Times.format(seconds)or B.clock(seconds)),run_id=run and run.id}
@@ -106,8 +128,8 @@ function B.model(tracker,m,run,seconds,basis,list,cls)
  local roster,ids=c.operative_roster or {},c.operative_identities or {}
  local function who(id,class)id=tostring(id or "");local q=roster[id]or ids[id]or {};return clean(q.name)or CN[q.class or class]or "Teammate"end
  local ev={};for _,e in ipairs(src.lethality_events or {})do local s=e.sources and e.sources[1]
-  ev[#ev+1]={you=e.personal==true,died=e.outcome~="down",what=s and s.label or nil,name=e.personal~=true and who(e.victim,e.class)or nil}end
- M.events=ev
+  ev[#ev+1]={you=e.personal==true,died=e.outcome~="down",outcome=e.outcome,at=e.died_at or e.at,what=s and s.label or nil,name=e.personal~=true and who(e.victim,e.class)or nil}end
+ M.events=ev;M.clock,M.everyone=placed(src,ev)
  local all=Records.incident_counts(src);local own=all.personal or {};local team=all.team
  M.you={own.downs or 0,own.deaths or 0};M.mutant=own.mutant_charges or 0
  if team and team.downs then M.squad={team.downs or 0,team.deaths or 0}
@@ -230,8 +252,10 @@ function B.layout(M,measure,downs)
  if M.avg_any then rect(762,599.5,2,11,C.dim,3);local x=line({{"Your Average",11.5,C.dim}},769,598,13);text("Left Is Worse, Right Is Better",x+14,598,300,13,11.5,C.dim)end
  -- Downs And Deaths
  if downs then
-  panel(27,633,1218,126);local hw=h2("Downs And Deaths",44,646);local tag="Times Not Recorded Yet";local tgw=wid(tag,10.5)+12
-  edges(44+hw+12,646,tgw,18.5,C.faint,3);text(tag,44+hw+12,646,tgw,18.5,10.5,C.dim,nil,"center");text("Shown In Recorded Order",44+hw+24+tgw,649,240,13,11.5,C.dim)
+  panel(27,633,1218,126);local hw=h2("Downs And Deaths",44,646)
+  -- a match from before every time was saved says what is in order
+  local sub=not M.everyone and (M.clock and "Teammates In Recorded Order"or "Shown In Recorded Order")
+  if sub then text(sub,44+hw+12,649,360,13,11.5,C.dim)end
   local sum={{"You",12,C.dim},{tostring(M.you[1]),14,C.value,F.display,4},{"Downs,",12,C.dim,nil,4},{tostring(M.you[2]),14,C.rust,F.display,4},{"Died",12,C.dim,nil,4},
    {"Squad",12,C.dim,nil,18},{tostring(M.squad[1]),14,C.value,F.display,4},{"Downs,",12,C.dim,nil,4},{tostring(M.squad[2]),14,C.rust,F.display,4},{"Died",12,C.dim,nil,4}}
   if M.mutant>0 then sum[#sum+1]={"Caught By Mutant",12,C.dim,nil,18};sum[#sum+1]={tostring(M.mutant),14,C.value,F.display,4}end
@@ -240,7 +264,14 @@ function B.layout(M,measure,downs)
   lw=wid("Downed",11.5)+13;dot(lx-lw+4.5,657,4.5,C.value,3);dot(lx-lw+4.5,657,2.5,C.dark,4);text("Downed",lx-lw+13,650,lw,13,11.5,C.dim)
   text("You",44,680,70,15,12.5,C.body);text("Teammates",44,720,72,15,12.5,C.dim);rect(118,687,1111,1,C.lane,2);rect(118,727,1111,1,C.lane,2)
   local ev=M.events;local N=#ev;local last={-1e9,-1e9}
-  for i,e in ipairs(ev)do local x=118+1111*(N==1 and .5 or .076+(i-1)*.848/(N-1));local lane=e.you and 1 or 2
+  -- with the times known, the player's lane is the mission's clock, each down or death at its time above it, and the teammates keep their order
+  local mates,mi,tl=0,0,{};if M.clock then for _,e in ipairs(ev)do if not e.you then mates=mates+1 end end end
+  for i,e in ipairs(ev)do local x
+   if M.clock and (e.you or M.everyone)then x=124+1099*math.max(0,math.min(1,e.t/M.clock))end
+   if M.clock and e.you then local s=B.clock(e.t);local w=wid(s,10.5);local a=math.max(118,math.min(1229-w,x-w/2));if a>=(tl[#tl]or -1e9)+6 then text(s,a,668,w+2,13,10.5,C.gold);tl[#tl+1]=a+w end
+   elseif M.clock and not M.everyone then mi=mi+1;x=118+1111*(mates==1 and .5 or .076+(mi-1)*.848/(mates-1))
+   elseif not M.clock then x=118+1111*(N==1 and .5 or .076+(i-1)*.848/(N-1))end
+   local lane=e.you and 1 or 2
    local cy,r=e.you and 687.5 or 727.5,e.you and 5.5 or 4.5
    dot(x,cy,r,e.died and C.rust or C.value,3);if not e.died then dot(x,cy,r-2,C.dark,4)end
    local parts=e.you and {{e.died and "Died"or "Downed",11.5,e.died and C.rust or C.value,F.bold}}or {{e.name or "",10,C.faint}}
