@@ -39,7 +39,7 @@ function S.tab_slot(sw,sh,get)
  return x,y,f,cats,w,h
 end
 function S.options(get)
- local layout=get("scoreboard_layout");if not VALID[layout]then layout="table"end
+ local layout=get("scoreboard_layout");if not VALID[layout]then layout="cards"end
  -- the end screen has its own choice, Squad Cards unless changed
  local end_layout=get("scoreboard_end_layout");if not VALID[end_layout]then end_layout="cards"end
  local key=get("scoreboard_key_mode");if not KEY_VALID[key]then key="hold_board"end;local own=get("scoreboard_key")

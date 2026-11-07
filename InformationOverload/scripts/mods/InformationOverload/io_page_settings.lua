@@ -133,7 +133,7 @@ local function key_row(view,cv,popup_cv,y,o)
 end
 local function scoreboard(view,cv,popup_cv,y)
  local o=S.options(function(k)return mod:get(k)end);local h=45
- local list,shown={},"Squad Table";for _,l in ipairs(S.LAYOUTS)do list[#list+1]={value=l[1],label=l[2],current=o.layout};if l[1]==o.layout then shown=l[2]end end
+ local list,shown={},"Squad Cards";for _,l in ipairs(S.LAYOUTS)do list[#list+1]={value=l[1],label=l[2],current=o.layout};if l[1]==o.layout then shown=l[2]end end
  local elist,eshown={},"Squad Cards";for _,l in ipairs(S.LAYOUTS)do elist[#elist+1]={value=l[1],label=l[2],current=o.end_layout};if l[1]==o.end_layout then eshown=l[2]end end
  h=h+key_row(view,cv,popup_cv,y+h,o)
  local rh=row(view,cv,y+h,"Scoreboard In Missions","Shown in a mission by the key, as set above.",nil,function(ry)
@@ -151,7 +151,7 @@ local function tracker_tab(view,cv,popup_cv,y)
  local o=S.options(function(k)return mod:get(k)end);local h=45
  if not Screens.on("scoreboard")then h=h+key_row(view,cv,popup_cv,y+h,o)end
  h=h+row(view,cv,y+h,"Tracker Panel","Your mission time, kill streak, downs and kills beside the Esc menu.",nil,toggle(view,cv,o.esc,function()mod:set("scoreboard_esc",not o.esc,true)end))
- h=h+row(view,cv,y+h,"Tracker Panel On Held","Adds the Esc menu's Tracker Panel to the scoreboard the key shows, or shows it alone.",nil,toggle(view,cv,o.this_mission,function()mod:set("scoreboard_this_mission",not o.this_mission,true)end))
+ h=h+row(view,cv,y+h,"Tracker Panel On Held","Adds the Esc menu's Tracker Panel to the scoreboard's keybind.",nil,toggle(view,cv,o.this_mission,function()mod:set("scoreboard_this_mission",not o.this_mission,true)end))
  h=h+row(view,cv,y+h,"While Dead","'Tracker Panel' while you wait to be rescued.",nil,toggle(view,cv,o.dead,function()mod:set("scoreboard_dead",not o.dead,true)end))
  h=h+row(view,cv,y+h,"On The End Screen","The Tracker Panel above the squad when the key is held on the End Screen.",nil,toggle(view,cv,o.end_tm,function()mod:set("scoreboard_end_tm",not o.end_tm,true)end))
  h=places(view,cv,y,h,o,{{"tm","Tracker Panel Position","held"},{"tm_esc","Tracker Panel Position In The Esc Menu","esc"}})
