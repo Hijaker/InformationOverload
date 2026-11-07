@@ -15,7 +15,7 @@ local function rect(x,y,w,h,c,edge)x,y,w,h=ox+x*SX,oy+y*SY,w*SX,h*SY;if c then c
 local function text(s,x,y,size,c,align,title)
  local h=size*1.4;local top=y-.35*size-h/2;local bx,w,a
  if align=="end"then w=x-2;bx,a=x-w,"right"elseif align=="middle"then w=2*math.min(x,376-x);bx,a=x-w/2,"center"else bx,w,a=x,376-x,"left"end
- cv:text(s,ox+bx*SX,oy+top*SY,w*SX,h*SY,size*math.min(SX,SY),c,a,title and F.title or F.body)
+ cv:text(s,ox+bx*SX,oy+top*SY,w*SX,h*SY,size*math.min(SX,SY),c,a,type(title)=="string"and title or title and F.title or F.body)
 end
 local DRAW={}
 -- Character Select with I/O on, its parts where a 2000 by 1250 screenshot has them, fitted across the picture; no operative drawn
@@ -177,18 +177,36 @@ function DRAW.board()
  for i,w in ipairs({{"Lily","Zealot","3–0"},{"SandSnake","Veteran","2–1"}})do local y=1048+(i-1)*30
   btext(w[1],1478,y,3.5,B_WHITE,"start");btext(w[2],1640,y,3.5,B_GREY,"start");btext(w[3],1935,y,3.5,B_WHITE,"end")end
 end
+-- Squad Cards with Extra Stats, laid out as scoreboard_draw's own, their 950 by 486 shrunk into the picture, with example figures; each row's top
+-- figure gold, Downs and Deaths never
+local QK=346/950;local QY=42+(190-486*QK)/2;local QRULE=rgba(60,78,57,.6)
+local SQUAD={{"Kassia Venn","Veteran","61,204",.34,{"8,412","612","1,036","412","343","41","28","0","290","53","0","0"},true},
+ {"Brother Mord","Zealot","54,880",.31,{"12,880","1,184","488","388","331","37","19","1","300","31","1","0"}},
+ {"Ksen","Psyker","40,112",.22,{"4,120","803","597","290","243","25","22","0","150","93","0","0"}},
+ {"Dross","Ogryn","22,301",.12,{"9,960","241","352","175","153","12","9","1","140","13","2","1"}}}
+-- each row's label, its top and its kind: small, under Kills, or one half of the last row
+local QROWS={{"Boss Dmg",176,"small"},{"Weakspots Hit",202,"small"},{"Critical Hits",228,"small"},{"Kills",262},{"Lesser Enemies",290,"in"},{"Elites",312,"in"},
+ {"Specials",334,"in"},{"Monstrosities",356,"in"},{"Melee Enemies",386,"in"},{"Ranged Enemies",408,"in"},{"Downs",446,"half"},{"Deaths",446,"half2"}}
+local function n(v)return tonumber((v:gsub(",","")))end
 function DRAW.scoreboard()
- rect(16,42,346,190,BG.tracker,FRAME)
- for _,p in ipairs({{16,42},{350,42},{16,230},{350,230}})do rect(p[1],p[2],12,2,CORNER)end
- text("PLAYER",26,58,7,MUTED)
- for _,e in ipairs({{"DAMAGE",188},{"KILLS",224},{"ELITES",260},{"SPECIALS",308},{"DOWNS",348}})do text(e[1],e[2],58,7,MUTED,"end")end
- for i,e in ipairs({{"Kassia Venn","Veteran","61,204",1,{"412","41","28","0"}},{"Brother Mord","Zealot","54,880",.89,{"388","37","19","1"}},
-  {"Ksen","Psyker","40,112",.66,{"290","25","22","0"}},{"Dross","Ogryn","22,301",.37,{"175","12","9","2"}}})do
-  local y=64+(i-1)*41;local you=i==1
-  rect(22,y,334,1,FRAME);if you then rect(22,y+1,334,40,C.on);rect(22,y+1,2,40,GOLD)end
-  text(e[1],28,y+16,11,you and GOLD_HI or VALUE);text(e[2],28,y+29,8,MUTED)
-  text(e[3],188,y+18,13,you and GOLD or VALUE,"end",true);rect(142,y+26,46,2,TRACK);rect(142,y+26,46*e[4],2,you and GOLD or LABEL)
-  for j,x in ipairs({224,260,308,348})do text(e[5][j],x,y+25,13,you and j<4 and GOLD or VALUE,"end",true)end
+ local function q(x,y,w,h,c,edge)rect(16+x*QK,QY+y*QK,w*QK,h*QK,c,edge)end
+ -- a text in card units, centred on its row from y, lh tall
+ local function qt(s,x,y,lh,size,c,align,font)local k=size*QK;text(s,16+x*QK,QY+(y+lh/2)*QK+.35*k,k,c,align,font)end
+ local top,topd={},0
+ for _,p in ipairs(SQUAD)do topd=math.max(topd,n(p[3]));for j=1,10 do top[j]=math.max(top[j]or 0,n(p[5][j]))end end
+ for i,p in ipairs(SQUAD)do local cx=(i-1)*240;local you=p[6]
+  q(cx,0,230,486,BG.tracker,you and GOLD or FRAME)
+  for _,v in ipairs({{0,0},{1,0},{0,1},{1,1}})do q(cx+v[1]*218,v[2]*484,12,2,CORNER);q(cx+v[1]*228,v[2]*474,2,12,CORNER)end
+  qt(p[1],cx+16,12,26,20,you and GOLD_HI or VALUE);qt(p[2],cx+16,38,20,15,MUTED,nil,F.medium)
+  qt("Damage",cx+16,62,20,15,MUTED,nil,F.medium);qt(p[3],cx+16,82,46,40,n(p[3])==topd and GOLD or VALUE,nil,true)
+  q(cx+16,134,198,5,TRACK);q(cx+16,134,198*p[4],5,you and GOLD or LABEL)
+  qt(math.floor(p[4]*100+.5).."% of the squad's damage",cx+16,144,20,15,MUTED,nil,F.medium)
+  for _,y in ipairs({172,258,438})do q(cx+16,y,198,1,QRULE)end;q(cx+30,380,184,1,TRACK)
+  for j,e in ipairs(QROWS)do local inset=e[3]=="in";local half=e[3]=="half"and 0 or e[3]=="half2"and 108 or nil
+   local lx=cx+16+(inset and 14 or 0)+(half or 0);local lh=inset and 22 or 26;local v=p[5][j]
+   qt(e[1],lx,e[2],lh,(inset or e[3]=="small")and 15 or 17,inset and MUTED or LABEL,nil,F.medium)
+   qt(v,half and lx+90 or cx+214,e[2],lh,inset and 18 or e[3]=="small"and 20 or 22,j<=10 and n(v)==top[j]and n(v)>0 and GOLD or VALUE,"end",true)
+  end
  end
 end
 -- the Tracker Panel laid out as scoreboard_draw's own, its 700 by 362 shrunk into the picture, with example figures
