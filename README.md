@@ -12,16 +12,16 @@
 
 <p align="center">
   Information Overload gives your Darktide missions a history.<br>
-  Every run is kept on your PC, so you can come back to it and see more than whether you won.
+  Every run is kept on your PC, so you can come back to it and see more than just whether you won.
 </p>
 
 <p align="center">
-  <a href="https://www.nexusmods.com/warhammer40kdarktide/mods/1527">Download on Nexus Mods</a> · <a href="https://github.com/Hijaker/InformationOverload/wiki">The wiki</a> · <a href="https://github.com/Hijaker/InformationOverload/blob/main/IO-API.md">IO-API.md</a>
+  <a href="https://www.nexusmods.com/warhammer40kdarktide/mods/1527">Download on Nexus Mods</a> · <a href="https://github.com/Hijaker/InformationOverload/wiki">The Wiki</a> · <a href="https://github.com/Hijaker/InformationOverload/blob/main/IO-API.md">API Wiki</a>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/wiki/Hijaker/InformationOverload/images/endscreen.jpg" alt="The end screen with I/O's four Squad Cards" width="720"><br>
-  <sub>Squad Cards on the end screen: damage, boss damage, weakspots, crits, kills, downs and deaths for every player.</sub>
+  <img src="https://raw.githubusercontent.com/wiki/Hijaker/InformationOverload/images/overview.jpg" alt="I/O's dashboard on its Overview page: games, win rate, win streak, fastest clear, most damage and last mission, then personal bests, classes and recent form" width="760"><br>
+  <sub>The dashboard's Overview: your results, personal bests, classes and recent form at a glance.</sub>
 </p>
 
 ## Quick start
@@ -47,7 +47,7 @@ Nothing needs saving by hand: every mission is kept as you play.
 | [How do I see one character's history?](https://github.com/Hijaker/InformationOverload/wiki/Dossier#how-do-i-see-one-characters-history) | Dossier |
 | [Where is my history saved, and what's in it?](https://github.com/Hijaker/InformationOverload/wiki/Settings-and-Your-Data#where-is-my-history-saved-and-whats-in-it) | Settings and Your Data |
 
-Every other question, and every page, is in the [wiki](https://github.com/Hijaker/InformationOverload/wiki).
+Every other question, and every page, is in the [Wiki](https://github.com/Hijaker/InformationOverload/wiki).
 
 ## How the pages connect
 
@@ -67,4 +67,4 @@ graph LR
 
 ## For other mods
 
-Other mods and HUD scripts can read I/O's live numbers and match history. See [IO-API.md](https://github.com/Hijaker/InformationOverload/blob/main/IO-API.md).
+Other mods and HUD scripts can read I/O's live numbers and match history. See the [API Wiki](https://github.com/Hijaker/InformationOverload/blob/main/IO-API.md).
