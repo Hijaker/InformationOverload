@@ -30,7 +30,7 @@
 2. Put the `InformationOverload` folder in Darktide's `mods` folder and add `InformationOverload` to `mod_load_order.txt`, after the framework.
 3. Play a mission, then type `/io` in chat or bind **I/O's Key** in Mod Options.
 
-Nothing needs saving by hand: every mission is kept as you play.
+Every mission will now be kept saved, as you play.
 
 ## What do you want to know?
 
