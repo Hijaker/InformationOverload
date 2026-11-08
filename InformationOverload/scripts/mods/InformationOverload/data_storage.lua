@@ -1063,6 +1063,8 @@ function S:flush(checkpoint_only,sliced)
  self:settle()
  if not self.ready then return true end
  if not self.pending then return true end
+ -- the reason a failed save gives is this save's own
+ self.a.failure=nil
  if checkpoint_only==true and sliced and self:journal_ready()then
   local m=self.values.unfinished_run_v1
   if not self.recovery_baselines[m.data_before]then
@@ -1125,12 +1127,36 @@ function S.game_adapter()
  local base=app:gsub("\\","/").."/Fatshark/Darktide/";local root=base.."InformationOverload/"
  local a={root=root,json=cjson,created={},directories={}}
  local function full(path)assert(not path:find("..",1,true)and not path:match("^[/\\]")and not path:find(":",1,true),"Invalid data path");return root..path end
- -- Making a folder runs Windows' mkdir, which holds the game about 0.4 s. prepare starts it in the background ahead of a save,
- -- and a write into a folder still being made waits only for what is left of that.
+ -- Folders are made and checked through kernel32 where the game's FFI reaches it, one level at a time: no mkdir window and no
+ -- wait. Wine's mkdir makes no missing parent for a path with forward slashes, so under Proton no match folder was ever made.
+ local win
+ do local ffi=Mods.lua.ffi
+  if ffi then
+   pcall(ffi.cdef,"int CreateDirectoryA(const char *path, void *security);")
+   pcall(ffi.cdef,"unsigned long GetFileAttributesA(const char *path);")
+   pcall(ffi.cdef,"int RemoveDirectoryA(const char *path);")
+   local ok,C=pcall(function()local C=ffi.C;return C.CreateDirectoryA and C.GetFileAttributesA and C.RemoveDirectoryA and C end)
+   if ok and C then win=C end
+  end
+ end
+ local function windows(path)return (path:gsub("/","\\"))end
+ -- INVALID_FILE_ATTRIBUTES, read as unsigned or, where another mod declared it signed, as -1
+ local function win_exists(path)local at=tonumber(win.GetFileAttributesA(windows(path)));return at~=nil and at~=0xFFFFFFFF and at~=-1 end
+ local function win_make(folder)
+  folder=folder:gsub("[/\\]+$","")
+  if win_exists(folder)then return true end
+  local parent=folder:match("^(.*)[/\\][^/\\]+$")
+  if parent and parent:find("[/\\]")and not win_make(parent)then return false end
+  win.CreateDirectoryA(windows(folder),nil)
+  return win_exists(folder)
+ end
+ -- Without it, making a folder runs Windows' mkdir, which holds the game about 0.4 s. prepare starts it in the background ahead
+ -- of a save, and a write into a folder still being made waits only for what is left of that.
  local making={}
  -- Opening a folder fails with code 13, far quicker than renaming it onto itself; a file that opens is there too.
  -- The rename still answers when io.open gives no code.
  local function exists(path)
+  if win then return win_exists(path)end
   local f,_,code=io.open(path,"rb");if f then f:close();return true end
   if code==nil then local ok,_,c=os.rename(path,path);return ok==true or c==13 end
   return code==13
@@ -1144,12 +1170,13 @@ function S.game_adapter()
     if exists(folder)then a.directories[folder]=true else missing[#missing+1]=folder end
    end
   end
+  if win then for _,folder in ipairs(missing)do if win_make(folder)then a.directories[folder]=true end end;return end
   if not io.popen and not now then return end
   -- one mkdir for many folders, kept well inside cmd's 8191-character line
   local i=1
   while missing[i]do local parts,length={},0
    while missing[i]and(length==0 or length+#missing[i]<7000)do parts[#parts+1]=missing[i];length=length+#missing[i]+3;i=i+1 end
-   local command='mkdir "'..table.concat(parts,'" "')..'" 2>NUL'
+   local command='mkdir "'..windows(table.concat(parts,'" "'))..'" 2>NUL'
    if io.popen then local ok,pipe=pcall(io.popen,command,"r");if ok and pipe then for _,folder in ipairs(parts)do making[folder]=pipe end end
    else os.execute(command.." >NUL")end
   end
@@ -1162,7 +1189,8 @@ function S.game_adapter()
   if a.directories[folder]then return true end
   local pipe=making[folder]
   if pipe then for other,p in pairs(making)do if p==pipe then making[other]=nil end end;pcall(pipe.close,pipe)end
-  if not exists(folder)then os.execute('mkdir "'..folder..'" >NUL 2>NUL');if not exists(folder)then return false end end
+  if win then if not win_make(folder)then a.failure="could not make the folder "..(path:match("^(.*)/[^/]*$")or "of the save");return false end
+  elseif not exists(folder)then os.execute('mkdir "'..windows(folder)..'" >NUL 2>NUL');if not exists(folder)then a.failure="could not make the folder "..(path:match("^(.*)/[^/]*$")or "of the save");return false end end
   a.directories[folder]=true;return true
  end
  -- rmdir without /s leaves folders with any remaining files alone. It runs in the background like mkdir.
@@ -1171,7 +1199,8 @@ function S.game_adapter()
   for _,folder in ipairs(folders)do
    assert(folder:match("^Backup/%d+$")or folder:match("^Backup/%d+/[%w_./ -]+$"),"Invalid backup folder")
    a.directories[full(folder)]=nil
-   if a.exists(folder)then
+   if win then if a.exists(folder)then win.RemoveDirectoryA(windows(full(folder)))end
+   elseif a.exists(folder)then
     local part='rmdir "'..folder:gsub("/","\\")..'" 2>NUL'
     if #command+#part>6000 then commands[#commands+1]=command;command=""end
     command=command==""and part or command.." & "..part
@@ -1204,7 +1233,7 @@ function S.game_adapter()
  end
  function a.write(path,bytes)
   if not directory(path)then return false end
-  local f=io.open(full(path),"wb");if not f then return false end;local wrote=f:write(bytes);local closed=f:close();if wrote and closed then a.created[path]=true;return true end;os.remove(full(path));return false
+  local f=io.open(full(path),"wb");if not f then a.failure="could not write "..path;return false end;local wrote=f:write(bytes);local closed=f:close();if wrote and closed then a.created[path]=true;return true end;os.remove(full(path));a.failure="could not finish writing "..path;return false
  end
  function a.remove(path)return os.remove(full(path))end
  -- A big file is written, read and compared a part at a time, pause() between parts. The open file stays in a.open until it
@@ -1213,9 +1242,9 @@ function S.game_adapter()
  function a.abandon()local f=a.open;a.open=nil;if f then pcall(f.close,f)end end
  function a.write_parts(path,bytes,pause)
   if not directory(path)then return false end
-  local f=io.open(full(path),"wb");if not f then return false end;a.open=f
+  local f=io.open(full(path),"wb");if not f then a.failure="could not write "..path;return false end;a.open=f
   local wrote=true;for i=1,#bytes,a.part do wrote=f:write(bytes:sub(i,i+a.part-1));if not wrote then break end;pause()end
-  a.open=nil;local closed=f:close();if wrote and closed then a.created[path]=true;return true end;os.remove(full(path));return false
+  a.open=nil;local closed=f:close();if wrote and closed then a.created[path]=true;return true end;os.remove(full(path));a.failure="could not finish writing "..path;return false
  end
  function a.read_parts(path,pause)
   local f=io.open(full(path),"rb");if not f then return nil end;a.open=f

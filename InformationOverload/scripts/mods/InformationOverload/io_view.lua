@@ -350,7 +350,7 @@ function View:_render()
   self:_icon(base,"pin",34,27,on and C.gold_hi or C.label)
  end
  -- under the page at the right, the credits beside the version: the names lit, the rest muted, a small dot before the version
- do local line={{"Made By",C.muted,F.medium},{CREDITS[1][1],C.value},{"&",C.muted,F.medium},{CREDITS[2][1],C.value},false,{"v"..tostring(mod.version or ""),C.muted}}
+ do local line={{"By",C.muted,F.medium},{CREDITS[1][1],C.value},{"&",C.muted,F.medium},{CREDITS[2][1],C.value},false,{"v"..tostring(mod.version or ""),C.muted}}
   local ws,x={},1304;for i,s in ipairs(line)do ws[i]=s and self:_w(s[1],14,s[3])or 3;x=x-ws[i]-(i>1 and (s==false or line[i-1]==false)and 8 or i>1 and 4 or 0)end
   for i,s in ipairs(line)do if s then base:text(s[1],x,838,ws[i]+2,17,14,s[2],"left",s[3])else base:rect(x,845,3,3,C.muted)end;x=x+ws[i]+(line[i+1]==nil and 0 or (s==false or line[i+1]==false)and 8 or 4)end
  end

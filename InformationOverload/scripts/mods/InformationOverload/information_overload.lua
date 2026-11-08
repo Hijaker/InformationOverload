@@ -195,7 +195,12 @@ local function frame(tag,fn,...)
     return ok
 end
 local function saved_ok(ok)
-    if ok==false and not storage.warned then storage.warned=true;mod:echo("Could not save the data files. Previous saved data is retained.")elseif ok then storage.warned=nil end
+    if ok==false and not storage.warned then storage.warned=true;mod:echo("Could not save the data files. Previous saved data is retained.")
+        -- where it failed, for a report: a path inside the save folder, never the player's own folders
+        local why=storage.a and storage.a.failure or storage.error
+        local root=storage.a and storage.a.root;if why and root then local i=why:find(root,1,true);while i do why=why:sub(1,i-1)..why:sub(i+#root);i=why:find(root,1,true)end end
+        if why then mod:info("I/O save failed: %s",why)end
+    elseif ok then storage.warned=nil end
 end
 local click_job,click_rest,result_kept
 local function save(force,checkpoint_only,sliced)
@@ -633,6 +638,451 @@ end
 local function part(tag,fn)local ok,v=pcall(fn);if ok then return v end;mod:error("I/O %s: %s",tag,tostring(v))end
 collectors = part("Collectors",function()return mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/collectors")(mod, api)end)
 mod.io_collectors = collectors
+-- ##### Public read-only surface ##########################################
+-- Other mods read Information Overload's live numbers through mod.io_public.
+-- Nothing here writes, saves, or returns a table this mod owns: every value
+-- returned is built fresh. A slot number is never accepted as identity.
+local FrontendContract=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/frontend_contract")
+mod.io_public = {
+    version = 2,
+    capabilities = { live = collectors ~= nil, roster = true, history = true, events = true, frontend_contract = FrontendContract.version },
+}
+do
+    -- the kinds and armour keys the squad table files damage under, with the names the pages give them; void shields are in no total
+    local CATEGORIES = { total = "Total", melee = "Melee", ranged = "Ranged", other = "Other", boss = "Bosses", dot = "Damage Over Time",
+        dot_bleed = "Bleed", dot_burn = "Burn", dot_soulblaze = "Soulblaze", dot_toxin = "Toxin", dot_other = "Other Damage Over Time" }
+    local ARMOURS = { unarmored = "Unarmoured", armored = "Flak", resistant = "Unyielding", disgustingly_resilient = "Infested",
+        super_armor = "Carapace", berserker = "Maniac", unknown = "Unknown" }
+    -- as the pages name them (io_overview's class_names)
+    local CLASSES = { veteran = "Veteran", zealot = "Zealot", psyker = "Psyker", ogryn = "Ogryn", adamant = "Arbitrator", broker = "Hive Scum", cryptic = "Skitarius" }
+    -- who another player is outside the game, which no other mod is given
+    local PRIVATE = { steam_id = true, steam_name = true, account_id = true, account = true, friend_name = true }
+    local function scrub(v) if type(v) ~= "table" then return end
+        for k, x in pairs(v) do if PRIVATE[k] then v[k] = nil else scrub(x) end end
+    end
+    local EMPTY = {}
+    -- a match also keys some of its tables by account id, and names players by it: each account id it holds, mapped to that
+    -- player's character id where the match knows it
+    local function accounts(row)
+        local map = {}
+        local function note(acct, char) if type(acct) == "string" and acct ~= char and map[acct] == nil then map[acct] = char and tostring(char) or false end end
+        for id, p in pairs(row.context and row.context.operative_roster or EMPTY) do if type(p) == "table" then note(p.account_id, id) end end
+        for _, list in ipairs({ row.all_departures or EMPTY, row.departure_events or EMPTY }) do
+            for _, e in ipairs(list) do if type(e) == "table" then note(e.player, e.character_id) end end
+        end
+        for key, p in pairs(row.operative_clutches or EMPTY) do if type(p) == "table" then note(key, p.character_id) end end
+        for key in pairs(row.context and row.context.departure_summary or EMPTY) do note(key, nil) end
+        return map
+    end
+    -- every account id swapped for its character id, as a key or a value, at any depth; one with no character id goes
+    local function swap(v, map)
+        if type(v) ~= "table" then return end
+        local moves
+        for k, x in pairs(v) do
+            if type(x) == "string" and map[x] ~= nil then v[k] = map[x] or nil else swap(x, map) end
+            if type(k) == "string" and map[k] ~= nil then moves = moves or {}; moves[#moves + 1] = k end
+        end
+        for _, k in ipairs(moves or EMPTY) do local x = v[k]; v[k] = nil; local to = map[k]; if to and v[to] == nil then v[to] = x end end
+    end
+
+    local function live_mission()
+        if not mod.io_current() then return nil, "stale" end
+        -- only the live counting starts a mission, so without it there is none to read
+        if not collectors then return nil, "unavailable" end
+        if not api.enabled() then return nil, "not recording" end
+        local m = api.tracker().mission
+        if not m or not m.context then return nil, "no mission" end
+        return m
+    end
+
+    -- the live squad damage table, read in place and never handed out
+    local function live_team(m)
+        local team = collectors:live_squad(m)
+        if type(team) ~= "table" then return nil, "not yet counted" end
+        return team
+    end
+
+    -- Accepts a character id string, a player object, a unit, or nil/true for
+    -- "me". A number is rejected rather than read as a slot.
+    local function id_from_unit(unit)
+        local spawn = Managers.state and Managers.state.player_unit_spawn
+        local player = spawn and spawn.owner and spawn:owner(unit)
+        if not player then
+            local players = Managers.player and Managers.player.players and Managers.player:players()
+            for _, p in pairs(players or {}) do
+                if p.player_unit == unit then player = p; break end
+            end
+        end
+        if not player then return nil end
+        local id = type(player.character_id) == "function" and player:character_id()
+        return id and tostring(id)
+    end
+
+    local function resolve_id(player)
+        if player == nil or player == true then return nil end
+        if type(player) == "string" then return player end
+        if type(player) == "table" then
+            if type(player.character_id) == "function" then
+                local id = player:character_id()
+                if id then return tostring(id) end
+            end
+            if player.player_unit ~= nil then return id_from_unit(player.player_unit) end
+            return nil
+        end
+        if type(player) == "userdata" then return id_from_unit(player) end
+        return nil
+    end
+
+    local function in_roster(m, id)
+        for rid in pairs(m.context.operative_roster or {}) do
+            if tostring(rid) == id then return true end
+        end
+        return false
+    end
+
+    -- the local player, as the scoreboard tells it: marked personal, or the mission's own character
+    local function is_me(m, id, p)
+        return p.personal == true or id == tostring(m.context.character)
+    end
+
+    -- the local player: the roster's own row, else the squad table's
+    local function personal_id(m, team)
+        for id, p in pairs(m.context.operative_roster or {}) do
+            if is_me(m, tostring(id), p) then return tostring(id) end
+        end
+        for id, p in pairs(team and team.members or {}) do
+            if p.personal == true then return tostring(id) end
+        end
+    end
+
+    local function find_run(run_id)
+        for _, r in ipairs(tracker.data.run_history or {}) do
+            if tostring(r.id) == tostring(run_id) then return r end
+        end
+    end
+
+    -- ##### Events
+    -- Other mods' handlers, each called in its own pcall with a table of its own, so one that fails or changes what it is
+    -- given touches nothing else; a handler that fails is told once.
+    local handlers, next_handle, told = {}, 0, {}
+    local EVENTS = { mission_start = true, mission_end = true }
+    local function fire(event, build)
+        local list = {}
+        for handle, h in pairs(handlers) do if h.event == event then list[#list + 1] = handle end end
+        table.sort(list)
+        for _, handle in ipairs(list) do local h = handlers[handle]
+            if h then local ok, err = pcall(h.fn, build())
+                if not ok and not told[handle] then told[handle] = true
+                    -- an error value whose own text raises stays inside here too
+                    local said, text = pcall(tostring, err)
+                    mod:error("I/O: another mod's %s handler failed: %s", event, said and type(text) == "string" and text or "(an error that could not be shown)")
+                end
+            end
+        end
+    end
+    -- the trackers that record what is being played, not one a history recount builds
+    local function live_tracker(t) return t == tracker or t == solo_tracker or (psykhanium_session ~= nil and t == psykhanium_session) end
+    local function about(c) return { name = c.mission_name, display_name = c.mission_display_name, difficulty = c.difficulty, mode = c.mode,
+        solo = c.solo == true, training = c.difficulty == "psykhanium" } end
+    local begin = Records.begin_mission
+    Records.begin_mission = function(self, ...)
+        local result = begin(self, ...)
+        local m = self.mission
+        if result and live_tracker(self) and m and m.context and m.context.difficulty ~= "psykhanium" and next(handlers) then local c = m.context; fire("mission_start", function() return about(c) end) end
+        return result
+    end
+    local finish = Records.finish_mission
+    Records.finish_mission = function(self, completed, victory, ...)
+        local m = self.mission; local before = self.data.run_sequence or 0
+        local result = finish(self, completed, victory, ...)
+        if result and m and m.context and m.context.difficulty ~= "psykhanium" and live_tracker(self) and next(handlers) then
+            local now = self.data.run_sequence or 0; local saved = now > before
+            fire("mission_end", function()
+                local info = about(m.context)
+                info.victory = victory == true
+                info.saved = saved
+                info.id = self == tracker and saved and now or nil
+                return info
+            end)
+        end
+        return result
+    end
+
+    function mod.io_public.on(event, fn)
+        if not mod.io_current() then return nil, "stale" end
+        if not EVENTS[event] then return nil, "unknown event" end
+        if type(fn) ~= "function" then return nil, "not a function" end
+        next_handle = next_handle + 1; handlers[next_handle] = { event = event, fn = fn }
+        return next_handle
+    end
+    function mod.io_public.off(handle)
+        if not mod.io_current() then return nil, "stale" end
+        if handlers[handle] then handlers[handle] = nil; return true end
+        return false
+    end
+
+    -- ##### Revision
+    -- Two numbers that only go up: the first when anything the live calls read has changed since it was last asked, the second
+    -- when the finished matches have. Reading them allocates nothing, so a script can ask every frame and rebuild only on a change.
+    local live_revision, history_revision, last = 0, 0, {}
+    local function differs(slot, value) if last[slot] ~= value then last[slot] = value; return true end return false end
+    function mod.io_public.revision()
+        if not mod.io_current() then return nil, "stale" end
+        local t = api.tracker(); local m = t.mission
+        local changed = differs(1, m)
+        local dealt, kills, roster, present = 0, 0, 0, 0
+        if m and m.context and collectors then
+            local team, party = collectors:live_squad(m)
+            for _, p in pairs(team and team.members or EMPTY) do for _, groups in pairs(p.groups or EMPTY) do for _, b in pairs(groups) do dealt = dealt + (b.reported or 0) end end end
+            for _, p in pairs(party and party.members or EMPTY) do kills = kills + (p.kills and p.kills.total or 0) end
+            for _, p in pairs(m.context.operative_roster or EMPTY) do roster = roster + 1; if p.present then present = present + 1 end end
+        end
+        local inc = m and m.incidents; local ti, pi, cur = inc and inc.team, inc and inc.personal, t.current
+        if differs(2, dealt) then changed = true end;if differs(3, kills) then changed = true end
+        if differs(4, roster) then changed = true end;if differs(5, present) then changed = true end
+        if differs(6, m and type(m.kills) == "number" and m.kills or 0) then changed = true end
+        if differs(7, ti and ti.downs or 0) then changed = true end;if differs(8, ti and ti.deaths or 0) then changed = true end
+        if differs(9, pi and pi.downs or 0) then changed = true end;if differs(10, pi and pi.deaths or 0) then changed = true end
+        if differs(11, cur and cur.head_combined or 0) then changed = true end;if differs(12, cur and cur.head_melee or 0) then changed = true end
+        if differs(13, cur and cur.head_ranged or 0) then changed = true end;if differs(14, cur and cur.kills or 0) then changed = true end
+        if differs(15, cur and cur.dodges or 0) then changed = true end
+        if changed then live_revision = live_revision + 1 end
+        local d = tracker.data
+        -- a recount, Rebuild, Import or Restore lands a new data table
+        local h1, h2, h3, h4, h5 = differs(30, #(d.run_history or EMPTY)), differs(31, d.run_sequence or 0), differs(32, d.history_policy_revision or 0), differs(33, mod.io_times_revision or 0), differs(34, d)
+        if h1 or h2 or h3 or h4 or h5 then history_revision = history_revision + 1 end
+        return live_revision, history_revision
+    end
+
+    -- the display names the pages use, for scripts that show them
+    function mod.io_public.names()
+        if not mod.io_current() then return nil, "stale" end
+        local out = { armour = {}, category = {}, class = {} }
+        for k, v in pairs(ARMOURS) do out.armour[k] = v end
+        for k, v in pairs(CATEGORIES) do out.category[k] = v end
+        for k, v in pairs(CLASSES) do out.class[k] = v end
+        return out
+    end
+
+    -- Active mission context, or a table saying no mission is under way.
+    function mod.io_public.mission()
+        if not mod.io_current() then return nil, "stale" end
+        local m = api.tracker().mission
+        if not m or not m.context then
+            return { active = false, in_hub = api.in_hub() == true }
+        end
+        local c = m.context
+        return {
+            active = true, in_hub = false,
+            training = mod.io_is_training(),
+            solo = mod.io_is_solo() == true,
+            name = c.mission_name, display_name = c.mission_display_name,
+            difficulty = c.difficulty, mode = c.mode, patch = c.patch,
+            full = m.full ~= false,
+            tracked_seconds = collectors and collectors:tracked_seconds() or nil,
+        }
+    end
+
+    -- One operative's damage this mission. player: character id, player object
+    -- or unit; nil/true means the local player.
+    -- opts: { overkill = true } reads reported instead of useful;
+    -- { category = "melee" }; { armour = "armored" }.
+    function mod.io_public.player_damage(player, opts)
+        if type(opts) ~= "table" then opts = nil end
+        local m, why = live_mission()
+        if not m then return nil, why end
+        local category = opts and opts.category or "total"
+        local armour = opts and opts.armour
+        if not CATEGORIES[category] then return nil, "unknown category" end
+        if armour ~= nil and not ARMOURS[armour] then return nil, "unknown armour" end
+        -- boss damage is kept as one figure, not split by armour
+        if armour ~= nil and category == "boss" then return nil, "unsupported" end
+        local team
+        team, why = live_team(m)
+        if not team then return nil, why end
+        local id = resolve_id(player)
+        if not id and (player == nil or player == true) then id = personal_id(m, team) end
+        if not id or id == "unknown_operative" or not (in_roster(m, id) or team.members and team.members[id]) then
+            return { reported = 0, useful = 0, overkill = 0, unknown = 0, share = 0, found = false }
+        end
+        local field = opts and opts.overkill and "reported" or "useful"
+        local mine = TeamDamage.summary(team, id, category, armour)
+        local all = TeamDamage.summary(team, nil, category, armour)
+        local value = mine[field] or 0
+        return {
+            reported = mine.reported or 0, useful = mine.useful or 0,
+            overkill = mine.overkill or 0, unknown = mine.unknown or 0,
+            share = (all[field] or 0) > 0 and value / all[field] or 0,
+            found = true,
+        }
+    end
+
+    -- Character id of the local player, as this mod understands it, so a
+    -- consumer can check its own "who is me" mapping instead of assuming slot 1.
+    function mod.io_public.whoami()
+        local m, why = live_mission()
+        if not m then return nil, why end
+        local id = personal_id(m, (live_team(m)))
+        if id then return id end
+        return nil, "local player not in the squad yet"
+    end
+
+    -- Who is in this mission, identity fields stripped.
+    -- The local player's runs in progress, as the Streaks page counts them.
+    function mod.io_public.streaks()
+        local m, why = live_mission()
+        if not m then return nil, why end
+        local t = api.tracker(); local cur = t.current or EMPTY; local c = m.context
+        -- read in place: the tracker's own lookup would make the entry it looks for
+        local s = t.data.class_mode_streaks; s = s and s[c.patch]; s = s and s[c.mode]; s = s and s[c.class]
+        return {
+            headshots = cur.head_combined or 0, melee_headshots = cur.head_melee or 0, ranged_headshots = cur.head_ranged or 0,
+            kills = cur.kills or 0, dodges = cur.dodges or 0,
+            kills_without_a_down = s and s.current and s.current.kill_run or 0,
+        }
+    end
+
+    function mod.io_public.roster()
+        local m, why = live_mission()
+        if not m then return nil, why end
+        local out = {}
+        for id, p in pairs(m.context.operative_roster or {}) do
+            out[tostring(id)] = {
+                name = p.name, class = p.class,
+                personal = is_me(m, tostring(id), p),
+                present = p.present == true, left = p.left == true,
+            }
+        end
+        return out
+    end
+
+    -- Every operative in the mission as a render-ready row, plus kills.
+    function mod.io_public.squad(opts)
+        if type(opts) ~= "table" then opts = nil end
+        local m, why = live_mission()
+        if not m then return nil, why end
+        local team, party = collectors:live_squad(m)
+        if type(team) ~= "table" then return nil, "not yet counted" end
+        local field = opts and opts.overkill and "reported" or "useful"
+        local total = TeamDamage.summary(team, nil, "total")[field] or 0
+        local own = m.kill_categories or {}
+        local counts = Records.incident_counts(m)
+        local c = m.context
+        local roster = c.operative_roster or {}
+        -- before the roster's first sample the local player is a row on their own, as on the scoreboard
+        if not next(roster) and c.character then roster = { [tostring(c.character)] = { name = c.character_name, class = c.class, personal = true } } end
+        local rows = {}
+        for id, p in pairs(roster) do
+            id = tostring(id)
+            local bucket = TeamDamage.summary(team, id, "total")
+            local member = party and party.members and party.members[id] or {}
+            local kills = member.kills or {}
+            local hits = team.members and team.members[id] and team.members[id].hits
+            local row = {
+                id = id, name = p.name, class = p.class,
+                personal = is_me(m, id, p), left = p.left == true,
+                damage = {
+                    reported = bucket.reported or 0, useful = bucket.useful or 0,
+                    overkill = bucket.overkill or 0, unknown = bucket.unknown or 0,
+                    share = total > 0 and (bucket[field] or 0) / total or 0,
+                    boss = TeamDamage.summary(team, id, "boss")[field] or 0,
+                },
+                kills = {
+                    total = kills.total or 0, boss = kills.boss or 0,
+                    elite = kills.elite or 0, special = kills.special or 0,
+                    lesser = (kills.horde_melee or 0) + (kills.horde_ranged or 0),
+                    melee = (kills.trash_fixed_melee or 0) + (kills.elite_melee or 0),
+                    ranged = (kills.trash_fixed_ranged or 0) + (kills.elite_ranged or 0),
+                },
+                hits = { weakspot = hits and hits.weakspot or 0, critical = hits and hits.critical or 0 },
+            }
+            -- the local player's kills are This Mission's own count, as the scoreboard shows them
+            if row.personal then
+                local k = row.kills
+                if type(m.kills) == "number" then k.total = m.kills end
+                k.boss, k.elite, k.special = own.boss or k.boss, own.elite or k.elite, own.special or k.special
+                if own.horde_melee or own.horde_ranged then k.lesser = (own.horde_melee or 0) + (own.horde_ranged or 0) end
+            end
+            local inc = row.personal and counts.personal or counts.members and counts.members[id] and counts.members[id].counts or {}
+            row.downs, row.deaths = inc.downs or 0, inc.deaths or 0
+            rows[#rows + 1] = row
+        end
+        table.sort(rows, function(a, b)
+            if a.personal ~= b.personal then return a.personal end
+            if a.damage[field] ~= b.damage[field] then return a.damage[field] > b.damage[field] end
+            return a.id < b.id
+        end)
+        return rows
+    end
+
+    -- a match's damage figures; a squad table with no row of yours means you dealt none, which is 0, not unknown
+    local function damage_of(r)
+        local own_useful, team_useful = Records.run_useful(r)
+        local own, _, reported = Records.run_damage_info(r)
+        local own_reported = reported ~= nil and own or nil
+        if team_useful ~= nil then own_useful, own_reported = own_useful or 0, own_reported or 0 end
+        return own_useful, team_useful, own_reported
+    end
+
+    -- a finished match as a list shows it, from what the match keeps in memory, so a list of every match reads nothing from disk
+    local function slim(r)
+        local c, k = r.context or {}, r.kill_categories or {}
+        local own_useful, team_useful, own_reported = damage_of(r)
+        return {
+            id = r.id, victory = r.victory, full = r.full ~= false, run_kind = r.run_kind, started_at = r.started_at,
+            seconds = r.completion_time and r.completion_time.seconds or nil,
+            mission = c.mission_name, display_name = c.mission_display_name, difficulty = c.difficulty, mode = c.mode, patch = c.patch,
+            class = c.class, character = c.character ~= nil and tostring(c.character) or nil, character_name = c.character_name,
+            kills = { total = type(r.kills) == "number" and r.kills or 0, elite = k.elite or 0, special = k.special or 0, boss = k.boss or 0 },
+            damage = { own_useful = own_useful, team_useful = team_useful, own_reported = own_reported },
+        }
+    end
+
+    -- Finished missions, newest first, a page at a time: opts.from counts from the newest (1 is the newest), opts.count how many;
+    -- with neither, every one. Each match is a small copy of its own; history_match gives one in full.
+    function mod.io_public.history(opts)
+        if not mod.io_current() then return nil, "stale" end
+        if type(opts) ~= "table" then opts = nil end
+        local from = math.max(1, math.floor(tonumber(opts and opts.from) or 1))
+        local count = opts and opts.count ~= nil and math.max(0, math.floor(tonumber(opts.count) or 0)) or math.huge
+        local runs = tracker.data.run_history or {}
+        local out = { total = 0, excluded = 0, matches = {} }
+        for i = #runs, 1, -1 do local r = runs[i]
+            if FrontendContract.accepted(r) then out.total = out.total + 1
+                if out.total >= from and #out.matches < count then out.matches[#out.matches + 1] = slim(r) end
+            else out.excluded = out.excluded + 1 end
+        end
+        return out
+    end
+
+    -- One finished mission in full, as the frontend contract shapes it; reads that match's file alone.
+    function mod.io_public.history_match(run_id)
+        if not mod.io_current() then return nil, "stale" end
+        local run = find_run(run_id)
+        if not run then return nil, "no such match" end
+        if not FrontendContract.accepted(run) then return nil, "excluded" end
+        local ok, built = pcall(FrontendContract.build, { run })
+        if not ok or not built.matches[1] then return nil, "unreadable match" end
+        local row = built.matches[1]
+        local map = accounts(row); scrub(row); swap(row, map)
+        return row
+    end
+
+    -- One finished mission's damage figures, by id, with the acceptance test history() uses.
+    function mod.io_public.run_damage(run_id)
+        if not mod.io_current() then return nil, "stale" end
+        local run = find_run(run_id)
+        if not run then return nil, "no such match" end
+        local own_useful, team_useful, own_reported = damage_of(run)
+        local countable = FrontendContract.accepted(run)
+        return {
+            own_useful = own_useful, team_useful = team_useful, own_reported = own_reported,
+            run_kind = run.run_kind,
+            excluded = not countable or nil,
+            countable = countable,
+        }
+    end
+end
 part("Scoreboard",function()mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/scoreboard_hud")(mod,collectors,api)end)
 part("Mission timer",function()mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/mission_timer_hud")(mod,collectors,mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/mission_times"))end)
 -- The screens I/O adds to, each left out if it fails to load; Scoreboard and Tracker are scoreboard_hud's, so their entries only name them.
@@ -838,11 +1288,10 @@ end
 mod:command("io_reset", "Move all saved statistics into a backup, after a confirmation", mod.io_request_reset)
 mod:command("io_restore", "Bring back the latest backup, after a confirmation", function()mod.io_request_restore(false)end)
 
-mod.version="1.0"
+mod.version="1.0.2"
 
 
 -- Draft integration seam for the data interface; no UI/navigation changes.
-local FrontendContract=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/frontend_contract")
 mod.io_frontend_data=function(runs,filters)
  return FrontendContract.build(runs or tracker.data.run_history or {},filters)
 end
