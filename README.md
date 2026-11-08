@@ -49,22 +49,6 @@ Every mission will now be kept saved, as you play.
 
 Every other question, and every page, is in the [Wiki](https://github.com/Hijaker/InformationOverload/wiki).
 
-## How the pages connect
-
-Most numbers in I/O lead back to the mission they came from.
-
-```mermaid
-graph LR
-  O[Overview] --> H[Match History]
-  O --> R[Records]
-  O --> T[Trends]
-  R --> M[One mission]
-  H --> M
-  T --> M
-  W[Weapons] --> M
-  D[Deaths] --> M
-```
-
 ## For other mods
 
 Other mods and HUD scripts can read I/O's live numbers and match history. See the [API Wiki](https://github.com/Hijaker/InformationOverload/blob/main/IO-API.md).
