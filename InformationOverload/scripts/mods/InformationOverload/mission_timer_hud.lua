@@ -2,9 +2,9 @@ return function(mod,collectors,Times)
  local Renderer=require("scripts/managers/ui/ui_renderer")
  local scenegraph={};local settings={material_flags=0};local text_options={}
  -- the mod's one UIHud.draw hook: the scoreboard draws from here too
- mod:hook_safe("UIHud","draw",function(hud)
+ mod:hook_safe("UIHud","draw",function(hud,_,_,input)
   if not mod:is_enabled()then return end
-  if mod.io_scoreboard then mod.io_scoreboard.hud(hud)end
+  if mod.io_scoreboard then mod.io_scoreboard.hud(hud,input)end
   if not mod.io_display_options().mission_timer then return end
   local seconds=collectors and collectors:timer_seconds();local renderer=hud._ui_renderer
   if not seconds or not renderer or not renderer.gui then return end

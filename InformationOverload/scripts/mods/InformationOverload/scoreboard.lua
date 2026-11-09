@@ -71,6 +71,8 @@ function S.release(st,now)
  if mode=="tap_board"then if tap then if not st.idle then flip(st,st.ctx)end;return end;st.on=nil;return "panel"end
  if tap and mode~="hold_only"then return "panel"end
 end
+function S.page(st)return st.page=="support"and "support"or "combat"end
+function S.flip(st)st.page=st.page~="support"and "support"or nil end
 function S.held(st,now,ctx)
  if st.on~=nil and st.on==ctx then return true end
  return not st.idle and st.t0~=nil and (st.mode==nil or HOLDS[st.mode]==true)and now-st.t0>=S.HOLD
@@ -202,8 +204,17 @@ local function extras(src,r,id,you,kills,field,deps)
  if party and party.fixed_roles or not party and live then r.melee=(kills.trash_fixed_melee or 0)+(kills.elite_melee or 0);r.ranged=(kills.trash_fixed_ranged or 0)+(kills.elite_ranged or 0)end
  local cats=you and src.m.kill_categories;if cats then if cats.horde_melee or cats.horde_ranged then r.lesser=(cats.horde_melee or 0)+(cats.horde_ranged or 0)end;r.monst=cats.boss or r.monst end
 end
-local TOP={"damage","kills","elites","specials","boss","weak","crit","lesser","monst","melee","ranged"}
+-- the Support page's figures, kept on the mission as support[character id]
+S.SUPPORT={"revives","saves","coherency","blocked","dodged","blitzes","abilities"}
+local TOP={"damage","kills","elites","specials","boss","weak","crit","lesser","monst","melee","ranged","revives","saves","coherency","coherency_share","blocked","dodged","blitzes","abilities"}
 local KINDS={"lesser","elites","specials","monst"}
+local function support(src,r,id)
+ local all=src.m.support;local mine=all and all[id];local none=(all or not src.saved)and 0 or nil
+ for _,f in ipairs(S.SUPPORT)do r[f]=mine and mine[f]or none end
+ -- time in coherency as a share of the time alive in the mission; a match saved before that was kept shows its time
+ r.tracked=mine and mine.tracked or nil
+ if r.tracked and r.tracked>0 then r.coherency_share=math.min(1,(r.coherency or 0)/r.tracked)elseif not src.saved and not r.tracked then r.coherency_share=0 end
+end
 local function squad(src,deps,c,counts)
  local m,team,party=src.m,src.team,src.party;local me=tostring(c.character)
  local roster=c.operative_roster or {};local rows={}
@@ -217,7 +228,9 @@ local function squad(src,deps,c,counts)
    kills=kills.total or 0,elites=kills.elite or 0,specials=kills.special or 0,downs=inc.downs or 0,deaths=inc.deaths or 0}
   -- your own row counts as This Mission does
   if you then local cats=m.kill_categories or {};r.kills=type(m.kills)=="number"and m.kills or r.kills;r.elites=cats.elite or r.elites;r.specials=cats.special or r.specials end
-  extras(src,r,id,you,kills,field,deps)
+  extras(src,r,id,you,kills,field,deps);support(src,r,id)
+  -- the table's kinds bar is each kind's share of this player's damage, where the match kept it
+  r.kind_damage=team and deps.Team.kinds(team,id,field)or nil
   r.share=total and total[field]>0 and dmg/total[field]or 0
   rows[#rows+1]=r
  end

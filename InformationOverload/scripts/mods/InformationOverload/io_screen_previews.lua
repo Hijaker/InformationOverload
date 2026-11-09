@@ -65,7 +65,7 @@ function DRAW.charselect()
 end
 local function social_panel()
  rect(16,14,346,244,BG.social,SEL)
- text("Your Record On This Operative",26,30,9,LABEL);text("Lily",26,48,15,VALUE);text("Veteran · 212 Games On File, 30 Oct 2026",26,61,8,LABEL)
+ text("Your Record On This Operative",26,30,9,LABEL);text("Lily",26,48,15,VALUE);text("Psyker · 212 Games On File, 30 Oct 2026",26,61,8,LABEL)
  for _,e in ipairs({{"Games","212",26},{"Wins","146",138},{"Win Rate","68.9%",250}})do rect(e[3]-4,68,106,38,TINT);text(e[1],e[3],80,8,LABEL);text(e[2],e[3],100,17,VALUE)end
  for _,x in ipairs({22,134,246})do rect(x,110,106,118,SHADE)end
  text("Win Rate By Difficulty",26,122,8,LABEL)
@@ -87,7 +87,7 @@ local function screen(k,x0,y0,y0p)
  local function sy(y)return y0p+(y-y0)*k end
  return function(x,y,w,h,c,edge)rect(sx(x),sy(y),w*k,h*k,c,edge)end,function(s,x,y,size,c,align)text(s,sx(x),sy(y),size,c,align)end,sx,sy
 end
--- Squad Social: the Strike Team with the second operative hovered, and the record panel in the friends list's place
+-- Squad Social: the Strike Team with the second operative, Lily, hovered, and the record panel in the friends list's place
 local SK=346/1668;local SY0P=14+(247-750*SK)/2
 local srect,stext,ssx,ssy=screen(SK,167,238,SY0P)
 local SQ_PANEL,SQ_INSET,SQ_METAL,SQ_FACE=rgba(38,52,38,.95),rgba(10,14,10,.85),rgba(110,112,104),rgba(138,138,128)
@@ -96,7 +96,8 @@ function DRAW.social()
  for i,y in ipairs({298,402})do local on=i==2
   srect(187,y,500,84,on and rgba(70,85,62,.6)or rgba(52,66,50,.6),on and GOLD or SQ_METAL);srect(192,y+6,66,72,rgba(58,58,52))
   cv:circle(ox+ssx(225),oy+ssy(y+6)+72*SK*.36,66*SK*.2,SQ_FACE);srect(201,y+54,48,24,SQ_FACE)
-  srect(276,y+24,i==1 and 150 or 120,16,rgba(228,228,218));srect(276,y+52,70,12,rgba(150,160,140))
+  local who=i==1 and {"HijaKer","Ogryn"}or {"Lily","Psyker"}
+  stext(who[1],276,y+40,6,rgba(228,228,218),"start");stext(who[2],276,y+66,4.5,rgba(150,160,140),"start")
  end
  for _,y in ipairs({506,610})do srect(187,y,500,84,SQ_INSET,SQ_METAL)end
  -- the record panel, drawn as its own picture and fitted to the list's box

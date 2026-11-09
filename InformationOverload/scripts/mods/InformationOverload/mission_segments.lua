@@ -53,11 +53,12 @@ function M.merge(first,last)
   out.team_damage=copy(last.team_damage or first.team_damage);out.team_damage.members=counts(first.team_damage and first.team_damage.members,last.team_damage and last.team_damage.members)
   -- weakspots and crits are whole only when each part that dealt damage counted them
   out.team_damage.hit_counts=(not first.team_damage or first.team_damage.hit_counts)and (not last.team_damage or last.team_damage.hit_counts)or nil
+  out.team_damage.kinds=(not first.team_damage or first.team_damage.kinds)and (not last.team_damage or last.team_damage.kinds)or nil
  end
  for _,field in ipairs({"barrel_pops","lethality_events","departure_events","all_departures"})do if first[field]or last[field]then out[field]=append(first[field],last[field])end end
  -- The player's own leave in the first part ends in this rejoin, so it is not a departure.
  local own=0;for i=1,#(first.all_departures or {})do local e=out.all_departures[i];if e.personal and not e.returned then e.returned=true;own=1 end end
- out.kill_categories=counts(first.kill_categories,last.kill_categories);out.kills=(first.kills or 0)+(last.kills or 0);out.players_left=math.max(0,(first.players_left or 0)-own)+(last.players_left or 0)
+ out.kill_categories=counts(first.kill_categories,last.kill_categories);out.support=(first.support or last.support)and counts(first.support,last.support)or nil;out.kills=(first.kills or 0)+(last.kills or 0);out.players_left=math.max(0,(first.players_left or 0)-own)+(last.players_left or 0)
  out.failed=copy(first.failed or {});for k,v in pairs(last.failed or {})do if v then out.failed[k]=v end end;out.exploded=first.exploded or last.exploded
  -- An interrupted active clutch is not a verified successful episode.
  local function closed(clutch)if clutch then clutch.active=nil;clutch.active_kind=nil;clutch.standing=false;clutch.seen=last.victory and (clutch.episodes or 0)>0 or false end end

@@ -5,7 +5,7 @@
 <p align="center"><sub><i>(By HijaKer and LilyMods)</i></sub></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.2-blue" alt="Version 1.0.2">
+  <img src="https://img.shields.io/badge/version-1.0.3-blue" alt="Version 1.0.3">
   <img src="https://img.shields.io/badge/requires-Darktide%20Mod%20Framework-c8a64a" alt="Requires Darktide Mod Framework">
   <img src="https://img.shields.io/badge/Linux-Proton-44cc11" alt="Works on Linux through Proton">
 </p>

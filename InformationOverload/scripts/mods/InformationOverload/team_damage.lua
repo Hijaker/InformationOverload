@@ -11,7 +11,7 @@ local function add(data,id,class,personal,category,armour,reported,useful,overki
  p.groups[category]=p.groups[category]or {};local b=p.groups[category][armour]or bucket();p.groups[category][armour]=b
  b.reported=b.reported+reported;b.useful=b.useful+useful;b.overkill=b.overkill+overkill;b.unknown=b.unknown+unknown
 end
-function T.new(saved)return {data=saved and copy(saved)or {version=1,members={},boss_recorded=true,shield_partition=true,hit_counts=true,basis="scoreboard_health_cache"},health=setmetatable({},{__mode="k"}),shield_health=setmetatable({},{__mode="k"}),observed_health=setmetatable({},{__mode="k"})}end
+function T.new(saved)return {data=saved and copy(saved)or {version=1,members={},boss_recorded=true,shield_partition=true,hit_counts=true,kinds=true,basis="scoreboard_health_cache"},health=setmetatable({},{__mode="k"}),shield_health=setmetatable({},{__mode="k"}),observed_health=setmetatable({},{__mode="k"})}end
 function T.seed(s,unit,hp,maximum)if unit and s.health[unit]==nil and valid(maximum)and maximum>0 then s.health[unit]=maximum end end
 function T.hit(s,e)
  if not valid(e.damage)or e.damage<=0 then return end
@@ -34,6 +34,8 @@ function T.hit(s,e)
  add(s.data,e.actor or "unknown_operative",e.class,e.personal,T.category(e),e.armour or "unknown",e.damage,useful,overkill,unknown)
  -- weakspots and crits are counted per hit report on an enemy, as the server sends one for every hit
  if e.actor and (e.weakspot or e.critical)then local p=s.data.members[e.actor];local n=p.hits or {weakspot=0,critical=0};p.hits=n;if e.weakspot then n.weakspot=n.weakspot+1 end;if e.critical then n.critical=n.critical+1 end end
+ if e.kind and e.actor and not shield then local p=s.data.members[e.actor];p.kinds=p.kinds or {};local k=p.kinds[e.kind]or bucket();p.kinds[e.kind]=k
+  k.reported=k.reported+e.damage;k.useful=k.useful+useful;k.overkill=k.overkill+overkill;k.unknown=k.unknown+unknown end
  if e.boss and e.actor then local p=s.data.members[e.actor];p.boss=p.boss or bucket();p.boss.reported=p.boss.reported+e.damage;p.boss.useful=p.boss.useful+useful;p.boss.overkill=p.boss.overkill+overkill;p.boss.unknown=p.boss.unknown+unknown;if shield then p.boss_void_shield=p.boss_void_shield or bucket();for field,value in pairs({reported=e.damage,useful=useful,overkill=overkill,unknown=unknown})do p.boss_void_shield[field]=p.boss_void_shield[field]+value end end end
  return {total=e.damage,useful=unknown==0 and useful or nil,health_before=budget,health_known=health_known}
 end
@@ -77,6 +79,13 @@ function T.summary(data,player,category,armour)
    for key,b in pairs(groups)do if key~="void_shield"and (not armour or key==armour)then for field in pairs(out)do out[field]=out[field]+(b[field]or 0)end end end
   end end
  end end;return out
+end
+-- a member's damage by enemy kind, in the scoreboard's names; nil for a match recorded before it was kept
+function T.kinds(data,player,field)
+ if not data or not data.kinds then return nil end
+ local p=data.members and data.members[player];local k=p and p.kinds;field=field or "useful"
+ local function n(kind)return k and k[kind]and k[kind][field]or 0 end
+ return {lesser=n("horde"),elites=n("elite"),specials=n("special"),monst=n("boss")}
 end
 function T.armours(data)
  local set={};for id,p in pairs(data and data.members or {})do if id~="unknown_operative"then for _,g in pairs(p.groups or {})do for key,b in pairs(g)do if key~="void_shield"and (b.useful or 0)>0 then set[key]=true end end end end end;return set

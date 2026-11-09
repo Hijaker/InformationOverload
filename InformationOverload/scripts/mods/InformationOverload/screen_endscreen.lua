@@ -1,4 +1,4 @@
--- Information Overload: the End Screen, the mission time and records under the squad, the Mission Debrief behind them, the held scoreboard, the hidden mission rating and the vote under Continue.
+-- Information Overload: the End Screen, the mission time and records under the squad, the Mission Debrief behind them, the held scoreboard, the hidden mission rating, the vote under Continue and Keep The End Screen Up.
 return function(mod,api,collectors)
  local base="InformationOverload/scripts/mods/InformationOverload/"
  local Times=mod:io_dofile(base.."mission_times")
@@ -10,6 +10,9 @@ return function(mod,api,collectors)
  }}
  local defaults={};for _,r in ipairs(M.rows)do defaults[r.key]=r.default end
  local function on()return mod:is_enabled()and mod:get("screen_endscreen")~=false end
+ -- Keep The End Screen Up keeps its own keys and is drawn under the rows on the tab by Settings, as Hide Mission Rating is
+ local Hold=mod:io_dofile(base.."end_screen_hold")(mod,on)
+ M.KEEP,M.keep_minutes=Hold.KEEP,Hold.minutes
  local function row(key)local v=mod:get(key);if v==nil then return defaults[key]end;return v==true end
  -- Hide Mission Rating keeps its own key and is drawn under the rows on the tab by Settings, so it is not one of them
  local function hide_rating()return on()and mod:get("hide_match_rating")==true end
@@ -191,7 +194,7 @@ return function(mod,api,collectors)
   elseif not broken then local ui=Managers.ui;local up=over_input and ui and ui:view_active("end_player_view")
    local ok,err=pcall(lines,view,renderer,up and over_input or input,t,over_seen);if not ok then fail(err)end
   end
-  local sb=mod.io_scoreboard;if sb and sb.over_end then sb.over_end(renderer,name)end
+  local sb=mod.io_scoreboard;if sb and sb.over_end then sb.over_end(renderer,name,input)end
  end
  -- Layout E: while the vote is up it sits on the line under Continue, its right edge on Continue's, and Rate Mission is always lifted to the screen's right edge, level with the XP bar; with End Screen off the game's own layout is kept
  -- the XP bar's middle is 244 up from the screen's foot, and Rate Mission's title and thumbs, 12 to 78 down its 96, have theirs 51 up from its own
@@ -239,7 +242,7 @@ return function(mod,api,collectors)
   elseif self.io_rating_hidden then w.visible=true;self.io_rating_hidden=nil end
  end
  -- the mod turned off stops its hooks, so an end screen already up gets the game's rating and vote back at once
- function M.off()local ui=Managers.ui;local v=ui and ui:view_instance("end_view");if v then rating(v);place(v)end end
+ function M.off()Hold.off();local ui=Managers.ui;local v=ui and ui:view_instance("end_view");if v then rating(v);place(v)end end
  mod:hook_require("scripts/ui/views/end_view/end_view",function(EndView)
   if EndView.io_endscreen==M then return end;EndView.io_endscreen=M
   mod:hook_safe(EndView,"_setup_rate_match",rating)
@@ -250,6 +253,7 @@ return function(mod,api,collectors)
   end)
   mod:hook_safe(EndView,"update",function(self)rating(self);if mod:is_enabled()or self.io_kept then place(self)end end)
   mod:hook_safe(EndView,"_draw_widgets",function(self,_,t,input,renderer)draw(self,renderer,"end_view",input,t)end)
+  Hold.end_view(EndView)
   mod:hook_safe(EndView,"on_exit",function()
    M.reset();local sb=mod.io_scoreboard;if sb and sb.end_closed then sb.end_closed()end
   end)

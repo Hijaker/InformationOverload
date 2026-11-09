@@ -8,6 +8,8 @@ return function(mod,collectors,api)
  local Renderer=require("scripts/managers/ui/ui_renderer")
  local SB={S=S,state={}}
  mod.io_scoreboard=SB
+ do local ok,v=pcall(function()return mod:io_dofile(base.."scoreboard_input")(mod,SB,S)end)
+  if ok then SB.input=v else pcall(mod.error,mod,"I/O scoreboard clicks: %s",tostring(v))end end
  local get=function(k)return mod:get(k)end
  local opts,opts_at=nil,-1
  function SB.options()local now=os.clock();if not opts or now>=opts_at+.5 then opts=S.options(get);opts_at=now end;return opts end
@@ -131,7 +133,7 @@ return function(mod,collectors,api)
  end
  -- esc says the Esc menu is up: its Tracker Panel is drawn at its own place, and a squad held over it starts under that
  -- fin, the end screen: the squad lines up with the game's currency boxes and the Tracker Panel rests above it, drawn or not
- local function body(renderer,z,squad_too,tm_too,esc,layout,tab,fin)
+ local function body(renderer,z,squad_too,tm_too,esc,layout,tab,fin,input)
   local sb,seconds=SB.live();if not sb then return end
   local o=SB.options();layout=layout or o.layout;local k=renderer.scale or RESOLUTION_LOOKUP.scale or 1;local sw,sh=RESOLUTION_LOOKUP.width/k,RESOLUTION_LOOKUP.height/k
   pen.r,pen.z,pen.k=renderer,z,k
@@ -143,12 +145,16 @@ return function(mod,collectors,api)
    if fin then tx,ty=S.end_tm_place(sw,x,y,w*f,tw,th)else tx,ty=S.place(esc and "tm_esc"or "tm",get,sw,sh,tw,select(2,S.size("tm",nil,nil,true)))end;W.tm(pen,tx,ty,sb.tm,seconds)end
   if squad_too and #sb.squad>0 then
    if not fin then local b=tab and below(tab,sw,sh);if tab then seen={m=api.tracker().mission,sw=sw,sh=sh,b=b or nil}end;x,y,f=S.squad_place(get,sw,sh,w,h,esc,b,extra)end
-   W.squad(pen,layout,x,y,sb.squad,seconds,extra,f)
+   -- with Extra Stats the Squad Table and Squad Cards have a Combat and a Support page, flipped and hovered with the mouse
+   local paged=extra and SB.input;local ctx=fin and "end"or esc and "esc"or "hud"
+   local hover=paged and SB.input.hover(ctx,input,k,sw,sh)or nil
+   local dw,dh=W.squad(pen,layout,x,y,sb.squad,seconds,extra,f,extra and S.page(SB.state)or nil,hover)
+   if paged then SB.input.drawn(ctx,x,y,dw,dh,input,k)end
   end
  end
- local function draw(renderer,z,squad_too,tm_too,esc,layout,tab,fin)
+ local function draw(renderer,z,squad_too,tm_too,esc,layout,tab,fin,input)
   if not ALIGN then local v=Gui.VerticalAlignCenter;ALIGN={left={horizontal_alignment=Gui.HorizontalAlignLeft,vertical_alignment=v},right={horizontal_alignment=Gui.HorizontalAlignRight,vertical_alignment=v},center={horizontal_alignment=Gui.HorizontalAlignCenter,vertical_alignment=v}}end
-  local ok,err=pcall(body,renderer,z,squad_too,tm_too,esc,layout,tab,fin)
+  local ok,err=pcall(body,renderer,z,squad_too,tm_too,esc,layout,tab,fin,input)
   if not ok then fail(err)end
  end
  -- the bests are worked out on the mission's first HUD frame, not the first time the key is held
@@ -171,8 +177,8 @@ return function(mod,collectors,api)
   if not squad and not tm_too then return end
   return squad,tm_too,esc
  end
- -- called from the one UIHud.draw hook, in mission_timer_hud
- function SB.hud(hud)
+ -- called from the one UIHud.draw hook, in mission_timer_hud, with the HUD's input
+ function SB.hud(hud,input)
   local ui=Managers.ui;if not ui then return end
   local spectator=ui._spectator_hud;if hud~=(ui._hud or spectator)then return end
   local m=api.tracker().mission
@@ -188,7 +194,7 @@ return function(mod,collectors,api)
   Renderer.begin_pass(renderer,scenegraph,nil,0,settings)
   -- the game's UI goes no higher than layer 999, and anything drawn above it lands there with its box over its text, so the boxes
   -- sit just under and the text on 999, level with the cutscene bars and above their fade on 998
-  draw(renderer,995,squad,tm_too,esc,nil,overlay(hud))
+  draw(renderer,995,squad,tm_too,esc,nil,overlay(hud),nil,input)
   Renderer.end_pass(renderer)
  end
  -- beside the Esc menu, drawn inside the menu's own pass and only while it is the top view
@@ -200,13 +206,13 @@ return function(mod,collectors,api)
    draw(renderer,200,false,true,true)
   end)
  end)
- -- on the end screen, held, inside the end view's own pass; screen_endscreen's hook calls it with the view it hooked
- function SB.over_end(renderer,name)
+ -- on the end screen, held, inside the end view's own pass; screen_endscreen's hook calls it with the view it hooked and that view's input
+ function SB.over_end(renderer,name,input)
   if broken or not renderer or not on()then return end
   local ui=Managers.ui;if not ui or ui:active_top_view()~=name or not S.held(SB.state,os.clock(),SB.finished())then return end
   local o=SB.options();local squad,tm=board_on()and o.end_layout~="off",tracker_on()and o.end_tm
   if not squad and not tm then return end
-  draw(renderer,200,squad,tm,false,o.end_layout,nil,true)
+  draw(renderer,200,squad,tm,false,o.end_layout,nil,true,input)
  end
  return SB
 end

@@ -538,6 +538,8 @@ mod.update = function(dt)
     local mission_template=name and Missions[name]
     frame("Patch",update_patch,(not name or mission_template and mission_template.is_hub or training)and not (collectors and collectors:partial_pending()))
     if collectors then frame("Collectors",collectors.update,collectors,dt)end
+    -- the scoreboard's cursor goes as soon as the board does
+    if mod.io_scoreboard and mod.io_scoreboard.input then frame("Scoreboard",mod.io_scoreboard.input.tick)end
     frame("Folders",function()prepare_folders(tracker,"lifetime_records_v1");prepare_folders(solo_tracker,"solo_records_v1");prepare_folders(psykhanium_session,"psykhanium_logs_v1")end)
     if not frame("History",update_derived_cache,dt)then rebuild_job=nil;prepare_job=nil;cache_failed=rebuild_inputs()end
     -- the warm-ups are only a head start, so one that fails stops until the next mission rather than failing every frame
@@ -547,7 +549,7 @@ end
 local function boundary()
     warm_off=false
     if collectors then frame("Collectors",collectors.boundary,collectors)end
-    if mod.io_scoreboard then mod.io_scoreboard.state.t0=nil end
+    if mod.io_scoreboard then mod.io_scoreboard.state.t0=nil;if mod.io_scoreboard.input then pcall(mod.io_scoreboard.input.release)end end
     frame("Mission end",tracker.boundary,tracker); last_shot = setmetatable({}, {__mode = "k"}); frame("Save",save,true)
 end
 -- off the hub every save leaves the shared records for the hub, so a quit with no mission under way writes them
@@ -597,7 +599,7 @@ local api = {
     -- a mission's checkpoint as it ended, its result in it, written in one go before its match is saved
     keep_result = function() if tracker.mission then result_kept=save(true,true)==true end end,
     -- the End Screen's moment rides on the next full save, so the match just saved is not written again for it
-    end_screen_marked = function(t) local key=t==tracker and "lifetime_records_v1" or t==solo_tracker and "solo_records_v1";if key and storage.touch then storage:touch(key) end end,
+    end_screen_marked = function(t) local key=t==tracker and "lifetime_records_v1" or t==solo_tracker and "solo_records_v1";if key and storage.touch then storage:touch(key) end;mod.io_history_touched=(mod.io_history_touched or 0)+1 end,
     recovery_delta = function(m) return RecoveryDelta.capture(m.data_before,tracker.data,m.recovery_rows) end,
     in_hub = function()
         local manager=Managers.state and Managers.state.mission
@@ -641,7 +643,8 @@ mod.io_collectors = collectors
 -- ##### Public read-only surface ##########################################
 -- Other mods read Information Overload's live numbers through mod.io_public.
 -- Nothing here writes, saves, or returns a table this mod owns: every value
--- returned is built fresh. A slot number is never accepted as identity.
+-- returned is built fresh, and a reader keeps the ones it built for its own
+-- mod alone. A slot number is never accepted as identity.
 local FrontendContract=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/frontend_contract")
 mod.io_public = {
     version = 2,
@@ -825,17 +828,23 @@ do
     -- Two numbers that only go up: the first when anything the live calls read has changed since it was last asked, the second
     -- when the finished matches have. Reading them allocates nothing, so a script can ask every frame and rebuild only on a change.
     local live_revision, history_revision, last = 0, 0, {}
+    local function weak() return setmetatable({}, { __mode = "k" }) end
+    local seen_name, seen_class, seen_personal, seen_present, seen_left = weak(), weak(), weak(), weak(), weak()
     local function differs(slot, value) if last[slot] ~= value then last[slot] = value; return true end return false end
     function mod.io_public.revision()
         if not mod.io_current() then return nil, "stale" end
         local t = api.tracker(); local m = t.mission
         local changed = differs(1, m)
-        local dealt, kills, roster, present = 0, 0, 0, 0
+        local dealt, kills, roster, present, left, who, hits = 0, 0, 0, 0, 0, false, 0
         if m and m.context and collectors then
             local team, party = collectors:live_squad(m)
-            for _, p in pairs(team and team.members or EMPTY) do for _, groups in pairs(p.groups or EMPTY) do for _, b in pairs(groups) do dealt = dealt + (b.reported or 0) end end end
+            for _, p in pairs(team and team.members or EMPTY) do for _, groups in pairs(p.groups or EMPTY) do for _, b in pairs(groups) do dealt = dealt + (b.reported or 0) end end
+                if p.hits then hits = hits + (p.hits.weakspot or 0) + (p.hits.critical or 0) end end
             for _, p in pairs(party and party.members or EMPTY) do kills = kills + (p.kills and p.kills.total or 0) end
-            for _, p in pairs(m.context.operative_roster or EMPTY) do roster = roster + 1; if p.present then present = present + 1 end end
+            -- a name or class can arrive after the row does, so each row's are kept to compare against
+            for _, p in pairs(m.context.operative_roster or EMPTY) do roster = roster + 1; if p.present then present = present + 1 end; if p.left then left = left + 1 end
+                if seen_name[p] ~= p.name or seen_class[p] ~= p.class or seen_personal[p] ~= p.personal or seen_present[p] ~= p.present or seen_left[p] ~= p.left then
+                    seen_name[p], seen_class[p], seen_personal[p], seen_present[p], seen_left[p] = p.name, p.class, p.personal, p.present, p.left; who = true end end
         end
         local inc = m and m.incidents; local ti, pi, cur = inc and inc.team, inc and inc.personal, t.current
         if differs(2, dealt) then changed = true end;if differs(3, kills) then changed = true end
@@ -846,11 +855,13 @@ do
         if differs(11, cur and cur.head_combined or 0) then changed = true end;if differs(12, cur and cur.head_melee or 0) then changed = true end
         if differs(13, cur and cur.head_ranged or 0) then changed = true end;if differs(14, cur and cur.kills or 0) then changed = true end
         if differs(15, cur and cur.dodges or 0) then changed = true end
+        if differs(16, left) then changed = true end;if who then changed = true end;if differs(18, hits) then changed = true end
         if changed then live_revision = live_revision + 1 end
         local d = tracker.data
         -- a recount, Rebuild, Import or Restore lands a new data table
         local h1, h2, h3, h4, h5 = differs(30, #(d.run_history or EMPTY)), differs(31, d.run_sequence or 0), differs(32, d.history_policy_revision or 0), differs(33, mod.io_times_revision or 0), differs(34, d)
-        if h1 or h2 or h3 or h4 or h5 then history_revision = history_revision + 1 end
+        local h6 = differs(35, mod.io_history_touched or 0)
+        if h1 or h2 or h3 or h4 or h5 or h6 then history_revision = history_revision + 1 end
         return live_revision, history_revision
     end
 
@@ -864,23 +875,26 @@ do
         return out
     end
 
-    -- Active mission context, or a table saying no mission is under way.
-    function mod.io_public.mission()
-        if not mod.io_current() then return nil, "stale" end
+    -- Active mission context, or a table saying no mission is under way, written into out with every field set or cleared.
+    local function fill_mission(out)
         local m = api.tracker().mission
         if not m or not m.context then
-            return { active = false, in_hub = api.in_hub() == true }
+            out.active, out.in_hub = false, api.in_hub() == true
+            out.training, out.solo, out.name, out.display_name, out.difficulty, out.mode, out.patch, out.full, out.tracked_seconds = nil, nil, nil, nil, nil, nil, nil, nil, nil
+            return out
         end
         local c = m.context
-        return {
-            active = true, in_hub = false,
-            training = mod.io_is_training(),
-            solo = mod.io_is_solo() == true,
-            name = c.mission_name, display_name = c.mission_display_name,
-            difficulty = c.difficulty, mode = c.mode, patch = c.patch,
-            full = m.full ~= false,
-            tracked_seconds = collectors and collectors:tracked_seconds() or nil,
-        }
+        out.active, out.in_hub = true, false
+        out.training, out.solo = mod.io_is_training(), mod.io_is_solo() == true
+        out.name, out.display_name = c.mission_name, c.mission_display_name
+        out.difficulty, out.mode, out.patch = c.difficulty, c.mode, c.patch
+        out.full = m.full ~= false
+        out.tracked_seconds = collectors and collectors:tracked_seconds() or nil
+        return out
+    end
+    function mod.io_public.mission()
+        if not mod.io_current() then return nil, "stale" end
+        return fill_mission({})
     end
 
     -- One operative's damage this mission. player: character id, player object
@@ -1081,6 +1095,92 @@ do
             excluded = not countable or nil,
             countable = countable,
         }
+    end
+
+    -- ##### Readers
+    -- One mod's own way in: the same calls, each handing back the table it built last time until revision() moves, so a script can
+    -- ask every frame and make no garbage. Each reader keeps its own tables, so what one mod does to them reaches no other mod.
+    local ME, NOBODY, NONE, REV, ORDER = {}, {}, {}, {}, {}
+    -- a key a table can be filed under: not nil, and not NaN, which is not even equal to itself
+    local function fileable(k) return k ~= nil and k == k end
+    function mod.io_public.reader()
+        if not mod.io_current() then return nil, "stale" end
+        local P = mod.io_public
+        local R, live, past, at_mission, ms, names = {}, {}, {}, nil, nil, nil
+        -- store[a][b], each made once and kept, so a change of revision makes no new tables
+        local function shelf(store, a, b)
+            local s = store[a]; if not s then s = {}; store[a] = s end
+            if b == nil then return s end
+            local t = s[b]; if not t then t = {}; s[b] = t end
+            return t
+        end
+        -- the table answer kept under key while rev is the revision it was built at; a nil and its reason are never kept, and a
+        -- shelf with a cap keeps that many answers, the oldest going first
+        local function asked(s, key)
+            local order = s[ORDER]; if not order then order = {}; s[ORDER] = order end
+            for i = #order, 1, -1 do if order[i] == key then table.remove(order, i); break end end
+            order[#order + 1] = key
+            return order
+        end
+        local function keep(s, key, rev, cap, fn, a, b)
+            local revs = s[REV]; if not revs then revs = {}; s[REV] = revs end
+            if revs[key] == rev then local v = s[key]; if v ~= nil then if cap then asked(s, key) end; return v end end
+            local r, why = fn(a, b)
+            if type(r) ~= "table" then return r, why end
+            if cap then local order = asked(s, key); if #order > cap then local old = table.remove(order, 1); s[old], revs[old] = nil, nil end end
+            s[key], revs[key] = r, rev
+            return r, why
+        end
+        -- the live revision while the live calls can answer, else nil, and the plain call gives its own reason; a new mission lets
+        -- go of the players who are not in it
+        local function live_rev()
+            local m = live_mission(); if not m then return nil end
+            if m ~= at_mission then at_mission = m
+                local roster, kept = m.context.operative_roster or EMPTY, live.player_damage
+                for id in pairs(kept or EMPTY) do if id ~= ME and id ~= NOBODY and roster[id] == nil then kept[id] = nil end end
+            end
+            return (P.revision())
+        end
+        local function past_rev() local l, h = P.revision(); if l == nil then return nil end; return h end
+        function R.revision() return P.revision() end
+        function R.whoami() return P.whoami() end
+        function R.names()
+            if not mod.io_current() then return nil, "stale" end
+            names = names or P.names(); return names
+        end
+        -- the same table every time, brought up to date as it is asked for, since its tracked_seconds counts up between revisions
+        function R.mission()
+            if not mod.io_current() then return nil, "stale" end
+            ms = ms or {}; return fill_mission(ms)
+        end
+        function R.squad(opts)
+            local rev = live_rev(); if not rev then return P.squad(opts) end
+            return keep(shelf(live, "squad"), type(opts) == "table" and opts.overkill and "reported" or "useful", rev, nil, P.squad, opts)
+        end
+        function R.roster() local rev = live_rev(); if not rev then return P.roster() end;return keep(shelf(live, "roster"), 1, rev, nil, P.roster) end
+        function R.streaks() local rev = live_rev(); if not rev then return P.streaks() end;return keep(shelf(live, "streaks"), 1, rev, nil, P.streaks) end
+        function R.player_damage(player, opts)
+            local rev = live_rev(); if not rev then return P.player_damage(player, opts) end
+            local o = type(opts) == "table" and opts or nil
+            local id = resolve_id(player) or (player == nil or player == true) and ME or NOBODY
+            -- read as the plain call reads them: a false armour is an armour of its own, which it refuses
+            local cat, arm = o and o.category or "total", o and o.armour
+            if arm == nil then arm = NONE end
+            if not (fileable(cat) and fileable(arm)) then return P.player_damage(player, opts) end
+            return keep(shelf(shelf(live, "player_damage", id), cat, arm), o and o.overkill and "reported" or "useful", rev, nil, P.player_damage, player, opts)
+        end
+        function R.history(opts)
+            local rev = past_rev(); if not rev then return P.history(opts) end
+            local o = type(opts) == "table" and opts or nil
+            local from = math.max(1, math.floor(tonumber(o and o.from) or 1))
+            local count = o and o.count ~= nil and math.max(0, math.floor(tonumber(o.count) or 0)) or -1
+            if not (fileable(from) and fileable(count)) then return P.history(opts) end
+            return keep(shelf(past, "history"), from .. ":" .. count, rev, 16, P.history, opts)
+        end
+        -- full matches are large, so a reader keeps its last few
+        function R.history_match(run_id) local rev = past_rev(); if not rev then return P.history_match(run_id) end;return keep(shelf(past, "history_match"), tostring(run_id), rev, 8, P.history_match, run_id) end
+        function R.run_damage(run_id) local rev = past_rev(); if not rev then return P.run_damage(run_id) end;return keep(shelf(past, "run_damage"), tostring(run_id), rev, 64, P.run_damage, run_id) end
+        return R
     end
 end
 part("Scoreboard",function()mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/scoreboard_hud")(mod,collectors,api)end)
@@ -1288,7 +1388,7 @@ end
 mod:command("io_reset", "Move all saved statistics into a backup, after a confirmation", mod.io_request_reset)
 mod:command("io_restore", "Bring back the latest backup, after a confirmation", function()mod.io_request_restore(false)end)
 
-mod.version="1.0.2"
+mod.version="1.0.3"
 
 
 -- Draft integration seam for the data interface; no UI/navigation changes.

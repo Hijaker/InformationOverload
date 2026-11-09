@@ -41,7 +41,7 @@ function View:on_enter()
  View.super.on_enter(self)
  -- a scoreboard tapped on goes off once the panel opens
  local sb=mod.io_scoreboard;if sb and sb.state then sb.state.on=nil end
- self.io_key_armed=nil;self.pinned=mod:get("rail_pinned")==true;self.rail_mode=nil;self.rows=nil;self.leaving=nil;self.swap_t0=nil;self.io_bar_drag=nil
+ self.io_key_armed=nil;self.pinned=mod:get("rail_pinned")==true;self.rail_mode=nil;self.rows=nil;self.leaving=nil;self.swap_t0=nil;self.io_bar_drag=nil;self.io_slide=nil
  self.page="overview";self.stack={};self.io_steps=nil;self.io_psyk_deleting=nil;self.io_psyk_del=nil;self.io_run_back=nil;self.dd=nil;self.drawer=self.pinned;self.drawer_t0=nil;self.drawer_k=nil;self.scope=nil
  -- a mission opened from the End Screen sits on Match History, so Back and right click have somewhere to go
  if self.io_run then self.page="run";self.stack={"history"};self.io_params={run=self.io_run};self.io_tab="overview";self.io_run=nil end
@@ -50,7 +50,7 @@ function View:on_enter()
  self:_refresh()
 end
 function View:on_exit()
- self.layers={};self.hits={};self.model=nil;self.rows=nil;self.leaving=nil;self.intro=nil;self.io_flash=nil;self.io_tip=nil;self.io_doss=nil;self.io_bar_drag=nil
+ self.layers={};self.hits={};self.model=nil;self.rows=nil;self.leaving=nil;self.intro=nil;self.io_flash=nil;self.io_tip=nil;self.io_doss=nil;self.io_bar_drag=nil;self.io_slide=nil
  if mod.io_storage and mod.io_storage.release_details then mod.io_storage:release_details()end
  if View.super.on_exit then View.super.on_exit(self)end
 end
@@ -261,7 +261,8 @@ function View:_sheet_end(cv)
  end
 end
 function View:_icon(cv,key,x,y,c)
- if key=="classes"then local pl=Managers.player:local_player(1);local pr=pl and pl:profile();local path=pr and pr.archetype and pr.archetype.archetype_icon_large
+ -- the safe lookup: before the game has connected, the plain one asks the network for an id it has not got and the game crashes
+ if key=="classes"then local pm=Managers.player;local pl=pm and pm.local_player_safe and pm:local_player_safe(1);local pr=pl and pl:profile();local path=pr and pr.archetype and pr.archetype.archetype_icon_large
   if path and Application.can_get_resource("material",path)then return cv:texture(path,x-2,y-2,24,24,c,true)end end
  -- I/O's logo, on Settings, fills its square 15% more than the other icons, about the same middle
  if key=="settings"then return cv:icon(Icons.settings,x-1.5,y-1.5,c,nil,23)end
@@ -644,13 +645,13 @@ function View:_pointer(x,y,t)
  elseif x and span and not self.dd then
   local icons=x>=22 and x<=66 and y>=span[1]and y<=span[2]
   local names=self.drawer and x>=-220 and x<=66 and y>=span[1]-14 and y<=span[2]+14
-  if (icons or names)and not self.io_bar_drag then self.close_at=nil
+  if (icons or names)and not self.io_bar_drag and not self.io_slide then self.close_at=nil
    if not self.drawer then self.open_at=self.open_at or t+.18;if t>=self.open_at then self.drawer=true;self.open_at=nil end end
   else self.open_at=nil;if self.drawer then self.close_at=self.close_at or t+.12;if t>=self.close_at then self.drawer=false;self.close_at=nil end end end
  else self.open_at=nil;self.close_at=nil;self.drawer=false end
  if was~=self.drawer then if self.drawer then self.drawer_t0=t;self.drawer_k=0 end;self:_render()end
- -- while the scroll bar is held nothing under the pointer lights up
- local held=self.io_bar_drag;local hit=not held and self:_top(x,y)or nil;local pair
+ -- while the scroll bar or a slider is held nothing under the pointer lights up
+ local held=self.io_bar_drag or self.io_slide;local hit=not held and self:_top(x,y)or nil;local pair
  local key=hit and hit.key;if key~=self.io_hkey then self.io_hkey=key;self:_render();hit=not held and self:_top(x,y)or nil end
  if hit and hit.rail and self.drawer then for _,h in ipairs(self.hits)do if h.rail==hit.rail and h.g~=hit.g then pair=h end end end
  local w=self._widgets_by_name;place(w.io_hover_a,hit);place(w.io_hover_b,pair)
@@ -727,8 +728,16 @@ function View:update(dt,t,input)
    self.scroll=self.scroll or {};if at~=(self.scroll[self.page]or 0)then self.scroll[self.page]=at;self:_render()end
   end
  end
+ -- a held slider follows the pointer along its track until let go anywhere, or until it is no longer drawn; the press that took it sets it too
+ local sl=self.io_slide
+ if sl then local drawn=false;for _,h in ipairs(self.hits)do if h.key==sl.key then drawn=true;break end end
+  if not drawn or not sl.fresh and not down(input,"left_hold")then self.io_slide=nil;self:_render()
+  elseif x then sl.fresh=nil;local v=math.floor(sl.min+(sl.max-sl.min)*math.max(0,math.min(1,(x-sl.x-7)/math.max(1,sl.w-14)))+.5)
+   if v~=sl.v then sl.v=v;sl.set(v);self:_render()end
+  end
+ end
  local span=self.sheet_span
- if span and x and x>=84 and x<=1306 and y>=span[1]and y<=span[2]and not self.dd and not self.io_bar_drag then
+ if span and x and x>=84 and x<=1306 and y>=span[1]and y<=span[2]and not self.dd and not self.io_bar_drag and not self.io_slide then
   local ok,wheel=pcall(input.get,input,"scroll_axis");local amount=ok and (type(wheel)=="number"and wheel or wheel and wheel[2])or 0
   if amount~=0 then self.scroll=self.scroll or {};local at=self.scroll[self.page]or 0;local new=math.max(0,math.min(self.scroll_max or 0,at-amount*60))
    if new~=at then self.scroll[self.page]=new;self:_render()end end

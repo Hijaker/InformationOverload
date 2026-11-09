@@ -239,7 +239,7 @@ local function merge(target,value)
  for k,v in pairs(value)do if type(v)=="table"and type(target[k])=="table"then merge(target[k],v)else target[k]=clone(v)end end
 end
 -- Keep compact reconstruction sources resident; large viewing/test data stays file-backed.
-local detail_fields={measurements=true,experimental=true,combat_timeline=true,party_records=true,damage=true,team_damage=true,performance=true,damage_diagnostics=true,compact_damage_test=true,talent_test=true}
+local detail_fields={measurements=true,experimental=true,combat_timeline=true,party_records=true,damage=true,team_damage=true,performance=true,damage_diagnostics=true,compact_damage_test=true,talent_test=true,talent_calibration=true}
 function S:release_details()self.detail_file=nil;self.detail_value=nil end
 function S:history_detail(desc)
  if self.detail_file~=desc.file then self.detail_value=assert(self:read(desc.file),"Missing match file");self.detail_file=desc.file end
@@ -348,9 +348,16 @@ function S:dataset_load(entry,key)
  if lost and rebuild then data.history_cache_rebuild_required=true end
  local missing=kind and self.prior_missing or {}
  if entry.history_present then data.run_history={};local listed,ids={},{}
-  for _,desc in ipairs(entry.history or {})do listed[desc.file]=true
-   local read,full=pcall(self.read,self,desc.file)
-   if read and type(full)=="table"then data.run_history[#data.run_history+1]=self:history_load(desc,full);ids[tostring(desc.id)]=true else self:skip(key,desc,read and "Missing match file"or full,kind and true)end
+  for _,desc in ipairs(entry.history or {})do local again=listed[desc.file];listed[desc.file]=true
+   -- a match file never changes, so a launch reads each once: an unfinished mission's records from before it list the same files as
+   -- the records themselves and share their matches, as they did while it was played, rather than holding every match twice
+   local shared=not again and self.launch_runs and self.launch_runs[desc.file]
+   if shared and equal(shared.desc,desc)then data.run_history[#data.run_history+1]=shared.run;ids[tostring(desc.id)]=true else
+    local read,full=pcall(self.read,self,desc.file)
+    if read and type(full)=="table"then local run=self:history_load(desc,full);data.run_history[#data.run_history+1]=run;ids[tostring(desc.id)]=true
+     if self.launch_runs and not again then self.launch_runs[desc.file]={desc=desc,run=run}end
+    else self:skip(key,desc,read and "Missing match file"or full,kind and true)end
+   end
   end
   -- Same id within the run sequence: a reset or import since then must not bring it back.
   local seq=tonumber(data.run_sequence)
@@ -655,13 +662,14 @@ function S:open()
  local ok,manifest,values
  for index,candidate in ipairs({bytes or false,backup or false})do if candidate then
   self.skipped,self.held,self.held_chunks,self.restored,self.unreported=nil,nil,nil,nil,nil;ok,manifest=pcall(self.decode,self,candidate)
-  if ok then self:finish_backup_moves(manifest);self.cache={};ok,values=pcall(self.load_manifest,self,manifest)end
+  if ok then self:finish_backup_moves(manifest);self.cache={};self.launch_runs={};ok,values=pcall(self.load_manifest,self,manifest)end
   if ok then self.manifest=manifest;self.values=values;self.cache={};self:release_details();self.ready=true
    local known={};for _,r in ipairs(manifest.missing or {})do known[r.file or r.reason]=true end
    for _,r in ipairs(self.skipped or {})do self.pending=true;if not known[r.file or r.reason]then self.unreported=self.unreported or {};self.unreported[r.file or r.reason]=true end end
    for key in pairs(self.restored or {})do self.dirty[key]=true;self.pending=true end
-   self:open_checkpoint();if index==2 then self.recovered=true;self.pending=true else self.index_verified=true end;return true end
+   self:open_checkpoint();self.launch_runs=nil;if index==2 then self.recovered=true;self.pending=true else self.index_verified=true end;return true end
  end end
+ self.launch_runs=nil
  error("Information Overload catalog could not be verified; existing files and settings were retained")
 end
 function S:get(key)return self.values[key]end

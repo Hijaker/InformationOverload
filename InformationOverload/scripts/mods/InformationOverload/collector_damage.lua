@@ -41,10 +41,15 @@ return function(mod,api,C,Timeline,mission_time)
      info={melee=snapshot.melee,ranged=snapshot.ranged,melee_template=WeaponTemplate.weapon_template_from_item(loadout.slot_primary),ranged_template=WeaponTemplate.weapon_template_from_item(loadout.slot_secondary)}
      if unit then weapon_info[unit]=info end;return info
     end
+    local NO_TAGS={}
+    local function enemy_kind(b)
+     if not b then return nil end;local tags=b.tags or NO_TAGS
+     return (b.is_boss or tags.monster or tags.captain)and "boss"or tags.special and "special"or tags.elite and "elite"or "horde"
+    end
     party_kill=function(target,attacker)
      local m=api.tracker().mission;if not m or not target then return end
      local enemy,b=is_enemy(target);if not enemy then return end;local id,class,personal=member(attacker);if not id then return end
-     local tags=b and b.tags or {};local kind=(b and b.is_boss or tags.monster or tags.captain)and "boss"or tags.special and "special"or tags.elite and "elite"or b and (Grouping.trash_ranged(b.name,b.ranged,last_enemy_attack[target])and "horde_ranged"or "horde_melee")
+     local kind=enemy_kind(b);if kind=="horde"then kind=Grouping.trash_ranged(b.name,b.ranged,last_enemy_attack[target])and "horde_ranged"or "horde_melee"end
      local group=kind=="horde_ranged"or kind=="horde_melee";group=group and "normal"or kind
      local kill_id,kill_label=b.name,EnemyCatalog.name(b.name)
      if group=="boss"then local resolved,label=BossIdentity.identify(target,b,extension);kill_id=resolved or kill_id;kill_label=label or kill_label end
@@ -79,7 +84,7 @@ return function(mod,api,C,Timeline,mission_time)
         local shield=armour=="void_shield"and target and extension(target,"toughness_system");local shield_maximum=shield and shield.max_toughness and shield.max_toughness(shield);local shield_damage=shield and shield.toughness_damage and shield.toughness_damage(shield);local shield_hp=type(shield_maximum)=="number"and type(shield_damage)=="number"and math.max(0,shield_maximum-shield_damage)or nil
         local enemy_name=b and enemy_display(b,target)or "Unknown Enemy"
         if id then party_hit(m,id,class,personal,target,attacker,profile,damage,attack_type,category,armour,enemy_name,result)end
-        return Compact.hit(damage_state,{shield_hp=shield_hp,shield_maximum=shield_maximum,target=target,actor=id,class=class,personal=personal,boss=b and (b.is_boss or b.tags and (b.tags.monster or b.tags.captain))or false,account=account,profile=name,enemy=enemy_name,armour=armour,category=category,damage=damage,result=result,maximum=maximum,hp=hp,weakspot=enemy and weakspot==true,critical=enemy and critical==true})
+        return Compact.hit(damage_state,{shield_hp=shield_hp,shield_maximum=shield_maximum,target=target,actor=id,class=class,personal=personal,boss=enemy_kind(b)=="boss",kind=enemy_kind(b),account=account,profile=name,enemy=enemy_name,armour=armour,category=category,damage=damage,result=result,maximum=maximum,hp=hp,weakspot=enemy and weakspot==true,critical=enemy and critical==true})
     end
     function C:damage_snapshot(m)
         if m and m==damage_mission and damage_state then return Compact.results(damage_state)end

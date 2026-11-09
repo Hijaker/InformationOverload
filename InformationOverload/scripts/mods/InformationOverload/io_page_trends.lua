@@ -36,7 +36,8 @@ local function results(view,cv,ms,y,tracker)
  y=vcard(view,cv,y,"winrate","Win Rate Over Time",(view.scope.mode=="havoc"and "Havoc"or "Non-Havoc").." · "..K.plural(n,"Mission"),318,function(cy,left)
   if roll then K.seg(view,cv,left-8,cy+13,{{5,"Last 5"},{10,"Last 10"},{0,"All So Far"}},roll,function(v)view.io_trend_roll=v end)end
   K.legend(view,cv,X+25,cy+46,{{"ln",C.gold,roll>0 and "Win Rate Over The Last "..roll.." Missions"or "Win Rate Over Every Mission So Far"},{"sq",KC.win,"Win"},{"sq",KC.loss,"Loss"}})
-  legend_right(view,cv,cy+46,won.." Of "..n.." Won · "..K.pc(won/n,0))
+  -- the figure for every mission, apart from the buttons, which only change the line
+  legend_right(view,cv,cy+46,"All "..K.plural(n,"Mission")..": "..K.pc(won/n,0))
   local top=cy+70;local x0,x1=CX+52,CX+CW-50;local yT,yB,yChip=top+14,top+176,top+190;local sw=(x1-x0)/n
   local function yy(v)return yB-(yB-yT)*v end
   K.day_axis(cv,ms,x0,sw,yT-8,yB,top+230)
@@ -46,9 +47,15 @@ local function results(view,cv,ms,y,tracker)
    if i>1 then cv:line(x0+sw*(i-1.5),yy(pts[i-1].rate),cx,yy(p.rate),2,C.gold)end
    cv:rect(cx-6,yChip,12,12,p.win and KC.win or KC.loss,true)
   end
-  for i,p in ipairs(pts)do K.dot(cv,x0+sw*(i-.5),yy(p.rate),4,C.gold)end
+  -- the dot under the pointer, and the results it counts picked out along the strip under the chart
+  local hk=type(view.io_hkey)=="string"and tonumber(view.io_hkey:match("^winrate|(%d+)$"))
+  if hk and pts[hk]then local a=roll>0 and math.max(1,hk-roll+1)or 1;local z=cv.z;cv.z=6;cv:rect(x0+sw*(a-1),yChip-4,sw*(hk-a+1),20,C.gold,false,.22);cv.z=z end
+  for i,p in ipairs(pts)do K.dot(cv,x0+sw*(i-.5),yy(p.rate),i==hk and 7 or 4,i==hk and C.gold_hi or C.gold)end
   cv:text(K.pc(pts[n].rate,0),x0+sw*(n-.5)+10,yy(pts[n].rate)-9,60,18,14,C.value)
-  hits(view,ms,x0,sw,yT-8,yB-yT+8,yChip+18-yB)
+  for i,r in ipairs(ms)do local a=roll>0 and math.max(1,i-roll+1)or 1;local k=i-a+1
+   local tip={i==a and "Mission "..i or "Missions "..a.." To "..i,math.floor(pts[i].rate*k+.5).." Of "..k.." Won · "..K.pc(pts[i].rate,0),"","Click to open the mission"}
+   view:_hit("base",x0+sw*(i-1),yT-8,sw,yChip+18-yT+8,K.open_run(view,r.id),{bg=C.row_h},nil,tip,"winrate|"..i)
+  end
  end,function()
   local rows,w={},0;for i,r in ipairs(ms)do if K.info(r).win then w=w+1 end
    table.insert(rows,1,{K.date(r),name_of(tracker,r),CN[r.context.class]or DASH,result(r),{K.pc(w/i,0),w.." Of "..i},act=K.open_run(view,r.id)})end

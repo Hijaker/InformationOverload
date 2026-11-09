@@ -12,7 +12,7 @@ It only reads. Nothing you call here can change I/O's data, its settings or what
 - [The calls](#the-calls)
   - [revision](#revision) · [mission](#mission) · [squad](#squad) · [player_damage](#player_damage) · [whoami](#whoami) · [roster](#roster) · [streaks](#streaks)
   - [history](#history) · [history_match](#history_match) · [run_damage](#run_damage)
-  - [names](#names) · [on and off](#on-and-off)
+  - [names](#names) · [on and off](#on-and-off) · [reader](#reader)
 - [What the damage numbers mean](#what-the-damage-numbers-mean)
 - [Keeping it fast](#keeping-it-fast)
 - [Reasons a call can give](#reasons-a-call-can-give)
@@ -65,7 +65,7 @@ end
 
 A `nil` never means zero. Zero damage comes back as `0`.
 
-Everything you get back is a fresh copy made for you. Keep it, sort it, change it; nothing in I/O is affected, and no other mod sees your changes.
+Everything you get back is a fresh copy made for you. Keep it, sort it, change it; nothing in I/O is affected, and no other mod sees your changes. A [reader](#reader) hands back the same copy until something changes, and it's still yours alone.
 
 **Stale.** After a mods reload, the I/O you fetched earlier no longer runs the game, and every call returns `nil, "stale"`. Fetch it again with `get_mod("information_overload")`, and register any [event handlers](#on-and-off) again.
 
@@ -278,7 +278,7 @@ It gives `nil, "excluded"` for a match `history()` leaves out, and `nil, "unread
 local r = api.run_damage(id)
 ```
 
-Just the damage numbers for one match, without loading the whole thing. Unlike `history()`, it also answers for matches I/O leaves out of its statistics.
+Just the damage numbers for one match, without loading the whole thing. Unlike `history()`, it also answers for matches I/O leaves out of its statistics. `id` is the match's id from [history](#history) or `mission_end`, the same one `history_match()` takes.
 
 | Field | What it is |
 |---|---|
@@ -332,6 +332,23 @@ When they come:
 - The Psykhanium sends neither. Private games send `mission_start` but no `mission_end`, as I/O doesn't keep them as matches.
 - After a mods reload you need to call `on` again.
 
+### reader
+
+```lua
+local reader = api.reader()    -- once, when your script starts
+
+local rows = reader.squad()    -- as often as you like
+```
+
+A reader has the same calls as `api`: `revision`, `mission`, `squad`, `player_damage`, `whoami`, `roster`, `streaks`, `history`, `history_match`, `run_damage` and `names`. It hands back the same table each time you ask the same thing, until `revision()` moves, so asking every frame makes no new tables.
+
+- Its tables are yours alone. No other mod sees them, and nothing you do to them reaches I/O.
+- If you change one, your own next answer has your change in it until the numbers move. `names()` never changes, and `mission()` is written over every time you ask. Copy a table first if you want to sort or edit it.
+- Each set of options is its own answer: `reader.squad()` and `reader.squad({ overkill = true })` are two tables.
+- `reader.mission()` is always the same table, brought up to date every time you ask, because `tracked_seconds` counts up without moving `revision()`.
+- It keeps the last 8 full matches you asked `history_match()` for, and the last 16 pages of `history()`.
+- After a mods reload it's stale like every other call. Get a new one from the new `api`.
+
 ## What the damage numbers mean
 
 Darktide reports every hit's full damage, even when the enemy only had a sliver of health left. I/O splits that up:
@@ -346,7 +363,7 @@ Damage to void shields is left out of every number, as it is on I/O's own pages.
 ## Keeping it fast
 
 - `revision()` costs almost nothing. Call it every frame and only fetch data when it changes.
-- `squad()`, `player_damage()`, `roster()` and `streaks()` are cheap enough for every frame, but each one builds new tables. With `revision()` you won't need to.
+- `squad()`, `player_damage()`, `roster()` and `streaks()` are cheap enough for every frame, but each one builds new tables. With `revision()` you won't need to, or ask through a [reader](#reader), which hands back the same tables until something changes.
 - `history()` is quick, and each match in it is small. With a long history, ask for a page instead of everything, and only when the `history` revision moves.
 - `history_match()` reads a file. Call it when someone wants to see one match, never every frame.
 
@@ -385,3 +402,4 @@ Damage to void shields is left out of every number, as it is on I/O's own pages.
 - `history_match()` no longer includes other players' Steam ids, Steam names, account ids or friends' names.
 - `squad()` rows gained downs, deaths, weakspot and critical hits, boss damage, and lesser, melee and ranged kills.
 - New calls: `revision()`, `streaks()`, `names()`, `on()` and `off()`.
+- `reader()` came later in version 2, so check `api.reader` exists before you use it.

@@ -90,7 +90,7 @@ function W.tab(pen,x,y,t,seconds,f,cats,ic)
  end
  return w,h
 end
-local function gold(r,f)return r.top[f]and C.gold or C.value end
+local function gold(r,f)if f=="coherency"and r.coherency_share then f="coherency_share"end;return r.top[f]and C.gold or C.value end
 -- downs and deaths are never gold
 local plain={downs=true,deaths=true}
 local function name_colour(r)return r.you and C.gold_hi or r.left and C.muted or C.value end
@@ -154,8 +154,27 @@ local BAR_COLS={{"damage","DAMAGE",455,170},{"boss","BOSS DMG",565,105},{"weak",
 local CARD_ROWS={{"Boss Dmg","boss",176,"small"},{"Weakspots Hit","weak",202,"small"},{"Critical Hits","crit",228,"small"},{"Kills","kills",262},
  {"Lesser Enemies","lesser",290,"in"},{"Elites","elites",312,"in"},{"Specials","specials",334,"in"},{"Monstrosities","monst",356,"in"},
  {"Melee Enemies","melee",386,"in"},{"Ranged Enemies","ranged",408,"in"},{"Downs","downs",446,"half"},{"Deaths","deaths",446,"half2"}}
+-- the Support page: Revives, Saves and Time In Coherency, then Attacks Blocked and Dodged, then Blitzes and Abilities Used, Downs and Deaths kept at the foot
+local SUPPORT_ROWS={{"Revives","revives",176,"small"},{"Saves","saves",202,"small"},{"Time In Coherency","coherency",228,"small"},
+ {"Attacks Blocked","blocked",275},{"Attacks Dodged","dodged",303},{"Blitzes Used","blitzes",365},{"Abilities Used","abilities",393},
+ {"Downs","downs",446,"half"},{"Deaths","deaths",446,"half2"}}
+local SUPPORT_COLS={{"revives","REVIVES",395,95},{"saves","SAVES",492.5,95},{"coherency","COHERENCY",590,95},{"blocked","BLOCKED",687.5,95},{"dodged","DODGED",785,95},{"blitzes","BLITZES",882.5,95},{"abilities","ABILITIES",980,95}}
+-- what each figure counts, shown under the scoreboard while the cursor is over it, one sentence a line
+local TIPS={damage={"Damage","Damage dealt to enemies."},boss={"Boss Damage","Damage dealt to Monstrosities and Captains."},
+ weak={"Weakspots","Hits that landed on a weakspot."},crit={"Critical Hits","Hits that were critical."},kills={"Kills","Enemies killed."},
+ lesser={"Lesser Enemies","Horde enemies killed, melee and ranged."},elites={"Elites","Elites killed."},specials={"Specials","Specials killed."},
+ monst={"Monstrosities","Monstrosities and Captains killed."},melee={"Melee Enemies","Lesser and elite enemies that fight up close, killed."},
+ ranged={"Ranged Enemies","Lesser and elite enemies that shoot, killed."},downs={"Downs","Times knocked down."},deaths={"Deaths","Times killed."},
+ revives={"Revives","Downed teammates helped back up."},
+ saves={"Saves","Teammates pulled up from a ledge, cut out of a net or freed after a respawn.","Killing an enemy that has a teammate pinned counts too."},
+ coherency={"Time In Coherency","Time spent in coherency with at least one teammate."},blocked={"Attacks Blocked","Enemy attacks blocked."},
+ dodged={"Attacks Dodged","Melee attacks dodged."},
+ blitzes={"Blitzes Used","Blitzes used.","A teammate's are worked out from their charges, so they can be slightly off."},
+ abilities={"Abilities Used","Combat abilities used.","A teammate's are worked out from their charges, so they can be slightly off."}}
 local EMPTY={}
 local PEN,X0,Y0,FS=nil,0,0,1
+-- the cursor in screen units while it is up, and what is under it this frame: a figure's name, or "kind" with its row and kind
+local HP,HIT,HR,HK,HX,HY,HW,HH
 -- figures, names and text widths are kept once worked out, so a held scoreboard makes no new strings a frame; each is let go when it grows large
 local CC,CUT,PCT,cc_n,cut_n={}, {}, {},0,0
 local function commas(n)if n==nil then return DASH end;local s=CC[n];if not s then if cc_n>600 then CC,cc_n={},0 end;s=S.commas(n);CC[n]=s;cc_n=cc_n+1 end;return s end
@@ -164,6 +183,19 @@ local function cut(s,n)
  local by=CUT[n];if not by then by={};CUT[n]=by end;local v=by[s];if not v then v=S.cut(s,n);by[s]=v;cut_n=cut_n+1 end;return v
 end
 local function pct(k)k=math.floor(100*k+.5);local s=PCT[k];if not s then s=string.format("%d%% of the squad's damage",k);PCT[k]=s end;return s end
+local CLK,SHARE,clk_n,share_n={}, {},0,0
+local share
+local function fig(r,f)
+ local v=r[f];if f~="coherency"then return commas(v)end
+ if r.coherency_share then return share(math.floor(100*r.coherency_share+.5))end;if v==nil then return DASH end
+ v=math.floor(v);local s=CLK[v];if not s then if clk_n>600 then CLK,clk_n={},0 end;s=S.clock(v);CLK[v]=s;clk_n=clk_n+1 end;return s
+end
+-- a kinds bar part's label, its share of the player's damage first and then its kills, or the share alone
+function share(p,kills)
+ if share_n>600 then SHARE,share_n={},0 end
+ local by=SHARE[p];if not by then by={};SHARE[p]=by end
+ local k=kills or false;local s=by[k];if not s then s=kills and p.."%  ·  "..commas(kills)or p.."%";by[k]=s;share_n=share_n+1 end;return s
+end
 local function width(s,size,font)
  if not PEN.width then return #s*size*.55 end
  local all=PEN.io_widths;if not all or all.n>600 then all={n=0};PEN.io_widths=all end
@@ -178,16 +210,30 @@ local function T(s,ax,ay,aw,ah,size,c,align,font)
  PEN:text(s,X0+ax*FS,Y0+ay*FS,aw*FS,ah*FS,size*FS,c,align,font)
 end
 local function B(ax,ay,aw,k,fill)R(ax,ay,aw,5,C.track,1);if k>0 then R(ax,ay,math.max(1,aw*math.min(1,k)),5,fill,2)end end
+local function hit(ax,ay,aw,ah,key,r,k)
+ if not HP then return end
+ local x,y=X0+ax*FS,Y0+ay*FS
+ if HP.x>=x and HP.x<x+aw*FS and HP.y>=y and HP.y<y+ah*FS then HIT,HR,HK,HX,HY,HW,HH=key,r,k,ax,ay,aw,ah end
+end
 -- the table's row: the rule above, the player's own tinted with its gold edge, name and class, then the damage with its share and the other figures
-local function table_row(r,ry,w)
+local function row_start(r,ry,w)
  R(20,ry,w-40,1,C.rule,1)
  if r.you then R(20,ry+1,w-40,83,C.on,1);R(20,ry+1,4,83,C.gold,2)end
  T(cut(r.name,20),30,ry+6,250,26,20,name_colour(r),"left",F.body);T(class_line(r),30,ry+31,250,20,15,C.muted,"left",F.medium)
- local d=BAR_COLS[1];T(commas(r.damage),d[3]-d[4],ry+4,d[4],32,26,gold(r,"damage"),"right",F.title);B(d[3]-120,ry+40,120,r.share,r.you and C.gold or C.label)
- for j=2,#BAR_COLS do local c=BAR_COLS[j];T(commas(r[c[1]]),c[3]-c[4],ry,c[4],52,24,plain[c[1]]and C.value or gold(r,c[1]),"right",F.title)end
+end
+local function table_row(r,ry,w)
+ row_start(r,ry,w)
+ local d=BAR_COLS[1];T(commas(r.damage),d[3]-d[4],ry+4,d[4],32,26,gold(r,"damage"),"right",F.title);B(d[3]-120,ry+40,120,r.share,r.you and C.gold or C.label);hit(d[3]-d[4],ry,d[4],52,"damage")
+ for j=2,#BAR_COLS do local c=BAR_COLS[j];T(commas(r[c[1]]),c[3]-c[4],ry,c[4],52,24,plain[c[1]]and C.value or gold(r,c[1]),"right",F.title);hit(c[3]-c[4],ry,c[4],52,c[1])end
+end
+-- the Support page's row: the same start, then a column for each figure
+local function support_row(r,ry,w)
+ row_start(r,ry,w)
+ for _,c in ipairs(SUPPORT_COLS)do T(fig(r,c[1]),c[3]-c[4],ry,c[4],52,24,gold(r,c[1]),"right",F.title);hit(c[3]-c[4],ry,c[4],52,c[1],r)end
 end
 -- how far the counts too small for their parts run past a bar bw long
 local function past(r,bw)
+ if r.kind_damage then return 0 end
  local sum,out=0,0;for _,k in ipairs(KIND)do sum=sum+(r[k]or 0)end;if sum<=0 then return 0 end
  for _,k in ipairs(KIND)do local v=r[k]or 0;if v>0 and width(commas(v),13,F.title)+10>bw*v/sum-2 then out=out+width(commas(v),13,F.title)+8 end end
  return out
@@ -200,7 +246,21 @@ local function kinds_width(rows,w)
  return bw
 end
 -- the kinds bar along the foot of a row, each count inside its part or, too small for it, just after the bar
+local function kinds_share(r,ry,bw)
+ local d=r.kind_damage;local sum=0;for _,k in ipairs(KIND)do sum=sum+(d[k]or 0)end;if sum<=0 then return end
+ local cx,sy,sh=30,ry+57,18
+ for _,k in ipairs(KIND)do local v=d[k]or 0;local kw=bw*v/sum
+  if v>0 then R(cx,sy,math.max(2,kw-2),sh,KIND_COL[k],2);hit(cx,sy,kw,sh,"kind",r,k)
+   -- the share and kills inside the part, the share alone where both will not fit, nothing on a sliver
+   local p=math.floor(100*v/sum+.5);local t=share(p,r[k]or 0);local tw=width(t,13,F.title)
+   if tw+10>kw-2 then t=share(p);tw=width(t,13,F.title)end
+   if tw+10<=kw-2 then T(t,cx,sy,kw-2,sh,13,INK,"center",F.title)end
+  end
+  cx=cx+kw
+ end
+end
 local function kinds(r,ry,bw)
+ if r.kind_damage then return kinds_share(r,ry,bw)end
  local sum=0;for _,k in ipairs(KIND)do sum=sum+(r[k]or 0)end;if sum<=0 then return end
  local sx,sy,sh=30,ry+57,18
  local cx,out=sx,sx+bw+8
@@ -223,13 +283,15 @@ local function key(t,ky,w)
  end
 end
 -- Squad Table: Damage, Boss Dmg, Weakspots, Crits, Kills, Downs and Deaths, the kinds bar along each row and the key under them
-local function table_extra(rows)
- local n=#rows;local w,h=S.size("squad","table",n,nil,true)
+local function table_extra(rows,page)
+ local n=#rows;local w,h=S.size("squad","table",n,nil,true);local support=page=="support"
  box(PEN,X0,Y0,w*FS,h*FS,C.frame)
- T("PLAYER",30,8,200,22,15,C.muted,"left",F.body);for _,c in ipairs(BAR_COLS)do T(c[2],c[3]-c[4],8,c[4],22,15,C.muted,"right",F.body)end
+ T("PLAYER",30,8,200,22,15,C.muted,"left",F.body);T(support and "SUPPORT"or "COMBAT",110,8,120,22,15,C.gold_hi,"left",F.body)
+ for _,c in ipairs(support and SUPPORT_COLS or BAR_COLS)do T(c[2],c[3]-c[4],8,c[4],22,15,C.muted,"right",F.body);hit(c[3]-c[4],8,c[4],22,c[1])end
+ if support then for i,r in ipairs(rows)do support_row(r,52+(i-1)*84,w)end;return w,h end
  local bw=kinds_width(rows,w);for i,r in ipairs(rows)do local ry=52+(i-1)*84;table_row(r,ry,w);kinds(r,ry,bw)end
  key(rows.totals or EMPTY,52+n*84+10,w)
- return w*FS,h*FS
+ return w,h
 end
 -- a taller card's row: its label, and its figure right-aligned clear of it, coming down in size where both will not fit
 local function card_row(r,cx,e)
@@ -239,24 +301,62 @@ local function card_row(r,cx,e)
  local lx,lw,lh,ls=cx+16+(inset and 14 or 0)+(half or 0),half and 56 or inset and 118 or 126,inset and 22 or 26,(inset or small)and 15 or 17
  T(e[1],lx,e[3],lw,lh,ls,inset and C.muted or C.label,"left",F.medium)
  local vx=lx+math.min(lw,width(e[1],ls,F.medium))+8
- T(commas(r[e[2]]),vx,e[3],(half and lx+90 or cx+214)-vx,lh,inset and 18 or small and 20 or 22,plain[e[2]]and C.value or gold(r,e[2]),"right",F.title)
+ T(fig(r,e[2]),vx,e[3],(half and lx+90 or cx+214)-vx,lh,inset and 18 or small and 20 or 22,plain[e[2]]and C.value or gold(r,e[2]),"right",F.title)
+ hit(lx,e[3],(half and lx+90 or cx+214)-lx,lh,e[2],r)
 end
 -- Squad Cards: each card grows down with Boss Dmg, Weakspots Hit and Critical Hits, and the kinds of kill under Kills
-local function cards_extra(rows)
- local w,h=S.size("squad","cards",#rows,nil,true)
+local function cards_extra(rows,page)
+ local w,h=S.size("squad","cards",#rows,nil,true);local support=page=="support"
  for i,r in ipairs(rows)do local cx=(i-1)*240
   box(PEN,X0+cx*FS,Y0,230*FS,h*FS,r.you and C.gold or C.frame)
   T(cut(r.name,16),cx+16,12,198,26,20,name_colour(r),"left",F.body);T(class_line(r),cx+16,38,198,20,15,C.muted,"left",F.medium)
-  T("Damage",cx+16,62,198,20,15,C.muted,"left",F.medium);T(commas(r.damage),cx+16,82,198,46,40,gold(r,"damage"),"left",F.title)
+  T("Damage",cx+16,62,198,20,15,C.muted,"left",F.medium);T(support and "SUPPORT"or "COMBAT",cx+16,62,198,20,13,C.muted,"right",F.body)
+  T(commas(r.damage),cx+16,82,198,46,40,gold(r,"damage"),"left",F.title);hit(cx+16,62,198,106,"damage")
   B(cx+16,134,198,r.share,r.you and C.gold or C.label);T(pct(r.share),cx+16,144,198,20,15,C.muted,"left",F.medium)
-  R(cx+16,172,198,1,C.rule,1);R(cx+16,258,198,1,C.rule,1);R(cx+30,380,184,1,C.track,1);R(cx+16,438,198,1,C.rule,1)
-  for _,e in ipairs(CARD_ROWS)do card_row(r,cx,e)end
+  if support then R(cx+16,172,198,1,C.rule,1);R(cx+16,258,198,1,C.rule,1);R(cx+16,348,198,1,C.rule,1);R(cx+16,438,198,1,C.rule,1)
+   for _,e in ipairs(SUPPORT_ROWS)do card_row(r,cx,e)end
+  else R(cx+16,172,198,1,C.rule,1);R(cx+16,258,198,1,C.rule,1);R(cx+30,380,184,1,C.track,1);R(cx+16,438,198,1,C.rule,1)
+   for _,e in ipairs(CARD_ROWS)do card_row(r,cx,e)end
+  end
  end
- return w*FS,h*FS
+ return w,h
 end
--- extra says Extra Stats is on, f the scale its layouts are drawn at; the Strip has no extra figures
-function W.squad(pen,layout,x,y,rows,seconds,extra,f)
- if extra and (layout=="table"or layout=="cards")then PEN,X0,Y0,FS=pen,x,y,f or 1;if layout=="table"then return table_extra(rows)end;return cards_extra(rows)end
+-- a text's words in lines no wider than room, each kept for the next frame
+local WRAP=setmetatable({},{__mode="k"})
+local function wrap(lines,room)
+ local kept=WRAP[lines];if kept and kept.room==room then return kept end
+ local out={room=room}
+ for i=2,#lines do local line
+  for word in lines[i]:gmatch("%S+")do if line and width(line.." "..word,16,F.medium)<=room then line=line.." "..word else if line then out[#out+1]=line end;line=word end end
+  if line then out[#out+1]=line end
+ end
+ WRAP[lines]=out;return out
+end
+-- what the figure under the cursor counts, lit where it is and told in a box just under the scoreboard, or over it where there is no room under
+local function caption(bw,bh)
+ local lines=TIPS[HIT]
+ if HIT=="coherency"and HR and HR.coherency_share and HR.tracked then
+  lines={"Time In Coherency","The share of their time alive in the mission spent in coherency with at least one teammate.",S.clock(HR.coherency or 0).." of "..S.clock(HR.tracked).."."}
+ elseif HIT=="kind"then local d=HR.kind_damage;local sum=0;for _,k in ipairs(KIND)do sum=sum+(d[k]or 0)end
+  lines={TIPS[HK]and TIPS[HK][1]or KIND_NAME[HK],math.floor(100*(d[HK]or 0)/math.max(sum,1e-9)+.5).."% of their damage.",commas(HR[HK]or 0).." killed."}end
+ if not lines then return end
+ R(HX,HY,HW,HH,C.label_tint,1)
+ local cw=math.max(bw,380);local out=wrap(lines,cw-28);local ch=46+#out*22
+ local x=math.max(0,math.min((HP.sw or math.huge)-cw,X0));local y=Y0+bh+8
+ if HP.sh and y+ch>HP.sh then y=math.max(0,Y0-8-ch)end
+ PEN:rect(x,y,cw,ch,C.box);PEN:rect(x,y,3,ch,C.gold,1)
+ PEN:text(lines[1],x+14,y+8,cw-28,26,18,C.gold,"left",F.title)
+ for i,l in ipairs(out)do PEN:text(l,x+14,y+34+(i-1)*22,cw-28,22,16,C.label,"left",F.medium)end
+end
+-- extra says Extra Stats is on, f the scale its layouts are drawn at, page "support" for the Support page and hover the cursor, {x,y,sw,sh} in
+-- screen units, while it is up; the Strip has no extra figures and no pages
+function W.squad(pen,layout,x,y,rows,seconds,extra,f,page,hover)
+ if extra and (layout=="table"or layout=="cards")then
+  PEN,X0,Y0,FS,HP,HIT=pen,x,y,f or 1,hover,nil
+  local w,h=(layout=="table"and table_extra or cards_extra)(rows,page)
+  if HIT then caption(w*FS,h*FS)end;HP,HR=nil,nil
+  return w*FS,h*FS
+ end
  if layout=="table"then return table_rows(pen,x,y,rows)elseif layout=="strip"then return strip(pen,x,y,rows,seconds)end
  return cards(pen,x,y,rows)
 end

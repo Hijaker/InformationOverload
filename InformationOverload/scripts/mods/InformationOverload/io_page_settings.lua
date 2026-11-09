@@ -77,6 +77,13 @@ local function endscreen(view,cv,popup_cv,y)
  local rating=mod:get("hide_match_rating")==true;local h=screen_rows(view,cv,popup_cv,y,45,"endscreen",{})
  h=h+row(view,cv,y+h,"Hide Mission Rating","Hides the thumbs up and down on the end screen that ask you to rate the mission.",nil,
   toggle(view,cv,rating,function()mod:set("hide_match_rating",not rating,true)end))
+ local E=mod.io_screens and mod.io_screens.endscreen
+ if E and E.KEEP then local m,K=E.keep_minutes(),E.KEEP
+  -- wrapped short of the slider and the minutes named left of it
+  local help=P.wrap(view,"How long the end screen stays up unless you press Continue. At 1 Minute it goes on when the game says, as normal. Kept up longer, the mission's server moves on without you and a loading screen takes you straight back to the Mourningstar on your own.",14,700,F.medium)
+  h=h+row(view,cv,y+h,"Keep The End Screen Up",help,nil,function(ry,rh)
+   P.slider(view,cv,"endscreen_keep_up_minutes",RX-220,ry+math.floor((rh-24)/2),220,m,K.min,K.max,P.plural(m,"Minute"),function(v)mod:set("endscreen_keep_up_minutes",v,true)end)end)
+ end
  return h+10,NAME.endscreen
 end
 local function buttons(view,cv,list)return function(y,h)local x=RX;for i=#list,1,-1 do local b=list[i];x=x-b[2];P.button(view,cv,x,y+math.floor((h-34)/2),b[2],34,b[1],b[3]);x=x-10 end end end

@@ -82,7 +82,7 @@ return function(mod,api,C,D)
         if target and not enemy then return end
         local tags=b and b.tags or {}
         local category
-        if not tags.monster and not tags.captain then
+        if not tags.monster and not tags.captain and not (b and b.is_boss) then
             category=tags.special and "special" or tags.elite and "elite" or enemy and "regular" or nil
         else category="boss"
         end

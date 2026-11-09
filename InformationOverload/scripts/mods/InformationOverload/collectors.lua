@@ -146,6 +146,7 @@ return function(mod, api)
     -- Dedicated-server melee evasion is also signalled through this exclusive
     -- sound RPC. Resolve the alias instead of guessing an audio resource name.
     mod:hook_safe("PlayerUnitFxExtension", "trigger_exclusive_wwise_event", function(fx, event_name)
+        if C.support then invoke(C.support.sound,fx,event_name)end
         invoke(function()
             if fx._unit ~= local_unit() then return end
             if event_name == "wwise/events/player/play_player_dodge_ranged_success" then
@@ -202,7 +203,10 @@ local EnemyCatalog=mod:io_dofile("InformationOverload/scripts/mods/InformationOv
     local watch_prophet,sample_prophet=Bosses.watch_prophet,Bosses.sample_prophet
     local boss_report_credit,kill_credit=Bosses.boss_report_credit,Bosses.kill_credit
     mod:hook_safe("MinionDeathManager","die",function(_,target,attacker,_,_,profile)boss_report_credit(target,attacker,profile,"died");kill_credit(target,attacker,profile);if party_kill then party_kill(target,attacker)end end)
+    local Support=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/collector_support")(mod,api,{member=member,local_unit=local_unit,invoke=invoke})
+    C.support=Support
     local function before_report(profile, target, attacker, weakspot, damage, result, attack_type, efficiency, critical)
+        if Support and (result=="blocked"or result=="died")then invoke(Support.report,target,attacker,result)end
         local attack_breed=breed(attacker)
         if attack_breed and attack_breed.breed_type=="minion"and not (attack_breed.is_boss or attack_breed.tags and (attack_breed.tags.monster or attack_breed.tags.captain))and (attack_type=="melee"or attack_type=="ranged")then last_enemy_attack[attacker]=attack_type end
         if C.modifier_probe.active then
@@ -307,6 +311,7 @@ local EnemyCatalog=mod:io_dofile("InformationOverload/scripts/mods/InformationOv
         end
     end
     mod:hook_safe("PlayerInteracteeExtension","stopped",function(self,result,actor)
+        if C.support then invoke(C.support.stopped,self,result,actor)end
         invoke(function()
             if result~="success" then return end
             local key=member(self._unit);local state=key and control_states[key]
@@ -375,15 +380,17 @@ local EnemyCatalog=mod:io_dofile("InformationOverload/scripts/mods/InformationOv
     C.update=function(self,...)
         local result=update(self,...);local m=api.tracker().mission
         Damage.refresh_squad(m)
+        if Support then invoke(Support.update,self.clock)end
 
         return result
     end
     -- a mission joined late or picked up after a mods reload has no start, only how long it has been tracked, from the first frame it is asked for; it lasted at least that
+    local NO_MARKS={}
     function C:tracked_seconds()
         local m=api.tracker().mission
         if not m or m.context.difficulty=="psykhanium"then return end
         if m.tracked_from==nil then m.tracked_from=mission_time()end;if not m.tracked_from then return end
-        local marks=m.completion_markers or {};local boss=mod.io_display_options and (mod.io_display_options()or {}).boss_map_timing;local stop=boss and marks.boss_death or marks.victory_request or marks.victory_transition or marks.outro_start
+        local marks=m.completion_markers or NO_MARKS;local boss=mod.io_display_options and (mod.io_display_options()or NO_MARKS).boss_map_timing;local stop=boss and marks.boss_death or marks.victory_request or marks.victory_transition or marks.outro_start
         local now=stop or mission_time();return now and math.max(0,now-m.tracked_from)
     end
     return C

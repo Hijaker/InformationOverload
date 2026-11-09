@@ -31,6 +31,15 @@ function P.toggle(view,cv,x,y,on,fn)
  view:_ctl(cv,"base",x,y,w,h,fn,{sel=on,hv={bg=C.fill_h,edge=C.hover}})
  cv.z=5;cv:rect(on and x+w-20 or x+6,y+5,14,14,on and C.gold or C.label)
 end
+-- a whole number from min to max along a track w wide, its value named to the left; pressed anywhere on it, the knob follows the pointer until let go
+function P.slider(view,cv,id,x,y,w,v,min,max,label,set)
+ local key="io_slide|"..id;local held=view.io_slide and view.io_slide.id==id;local lit=held or view.io_hkey==key
+ local k=max>min and (v-min)/(max-min)or 0;local kx=x+math.floor(k*(w-14)+.5)
+ cv:text(label,x-160,y,144,24,16,C.value,"right")
+ cv.z=4;cv:rect(x,y+11,w,2,C.frame);cv:rect(x,y+11,kx-x+7,2,C.gold)
+ cv.z=5;cv:rect(kx,y+5,14,14,lit and C.gold_hi or C.gold)
+ view:_hit("base",x-8,y-4,w+16,32,function()view.io_slide={id=id,key=key,x=x,w=w,min=min,max=max,v=v,set=set,fresh=true};return true end,nil,nil,nil,key)
+end
 function P.button(view,cv,x,y,w,h,label,fn,opt)
  opt=opt or {};local k=view:_ctl(cv,"base",x,y,w,h,fn,{sel=opt.sel,dis=opt.dis,hv={bg=C.fill_s,edge=C.sel}})
  cv:text(label,x,y,w,h,16,opt.sel and C.gold_hi or opt.danger and C.bad or C.value,"center",nil,k)
