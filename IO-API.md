@@ -373,7 +373,7 @@ Damage to void shields is left out of every number, as it is on I/O's own pages.
 |---|---|
 | `"stale"` | the mods were reloaded; fetch I/O again |
 | `"unavailable"` | I/O's live counting failed to load (`capabilities.live` is `false`) |
-| `"not recording"` | I/O is turned off, Personal Records is enabled alongside it, or Psykhanium tracking is off and you're in the Psykhanium |
+| `"not recording"` | I/O is turned off or Psykhanium tracking is off and you're in the Psykhanium |
 | `"no mission"` | no mission is running |
 | `"not yet counted"` | a mission is running but nobody has dealt damage yet |
 | `"local player not in the squad yet"` | `whoami()` before I/O has seen you |
