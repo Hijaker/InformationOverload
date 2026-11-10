@@ -52,7 +52,7 @@ The planned integration with LucLeto's **Overflow Meter** will let you save its 
 
 ## Hit tracking and overkill
 
-Improve hit tracking and the useful damage and overkill breakdown for explosives, the Inferno Force Staff and the Flamer. For explosives, a longer-term goal is to link delayed blasts to the shot that fired them. For flame weapons, the aim is to distinguish direct hits from damage over time more reliably.
+Improve hit tracking and the useful damage and overkill breakdown for explosives, the Psyker Force Staves and the Flamer. For explosives, a longer-term goal is to link delayed blasts to the shot that fired them. For flame weapons, the aim is to distinguish direct hits from damage over time more reliably.
 
 Other combat details to explore include stagger, suppression, impact, grab assists (Giving a trapper an "Assist" in your down or death, if you're downed while trapped) and more concrete contributions from companions such as the Cyber-Mastiff and Servo-Skull.
 
