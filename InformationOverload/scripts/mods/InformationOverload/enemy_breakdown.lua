@@ -1,5 +1,7 @@
 -- Existing saved kill counts; health samples come only from new observations.
 local B={}
+local mod=type(get_mod)=="function"and get_mod("information_overload")
+local Party;local function enemy_kills(p)if not Party and mod and mod.io_dofile then Party=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/party_records")end;return Party and Party.kills(p)or p.enemy_kills or {}end
 function B.build(runs,group,role,scope)
  local out={selected=0,games=0,health_games=0,health_merged_excluded=0,enemies={}}
  local function enemy(id,label)local e=out.enemies[id];if not e then e={label=label or "Unknown enemy",kills=0,health={},health_samples=0};out.enemies[id]=e end;return e end
@@ -13,7 +15,7 @@ function B.build(runs,group,role,scope)
    local counts=run.enemy_kill_counts or run.party_records
    if counts then out.games=out.games+1
     for _,p in pairs(counts.members or {})do if scope~="personal"or p.personal then
-     for _,k in pairs(p.enemy_kills or {})do local subgroup=tostring(k.subgroup or "");local ranged=subgroup=="ranged";local melee=subgroup=="melee"or subgroup=="bruiser"or subgroup=="horde"
+     for _,k in pairs(enemy_kills(p))do local subgroup=tostring(k.subgroup or "");local ranged=subgroup=="ranged";local melee=subgroup=="melee"or subgroup=="bruiser"or subgroup=="horde"
       if (not group or group=="all"or k.group==group)and (not role or role=="all"or role=="ranged"and ranged or role=="melee"and melee)then
        local row=enemy(k.enemy,k.label);row.kills=row.kills+(k.count or 0)
       end

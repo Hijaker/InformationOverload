@@ -71,7 +71,9 @@ function M.merge(first,last)
  local all=out.damage and out.damage.total and out.damage.total.all;local shield=out.damage and out.damage.total and out.damage.total.void_shield
  if all then out.records.total_damage_mission=math.max(0,(all.total or 0)-(shield and shield.total or 0))end
  if first.contributions or last.contributions then
-  out.contributions={version=1};for _,field in ipairs({"best","armour","blo_contexts","increments","kill_segments"})do out.contributions[field]=append(first.contributions and first.contributions[field],last.contributions and last.contributions[field])end
+  -- a saved part may keep its record entries packed; they are read back before the two are joined
+  local function part(c,field)if not c then return nil end;if M.entries and (field=="best"or field=="armour")then return M.entries(c,field)end;return c[field]end
+  out.contributions={version=1};for _,field in ipairs({"best","armour","blo_contexts","increments","kill_segments"})do out.contributions[field]=append(part(first.contributions,field),part(last.contributions,field))end
  end
  for _,field in ipairs({"operative_roster","operative_identities","operative_loadouts","teammates"})do local values=copy(first.context and first.context[field]or {});for k,v in pairs(last.context and last.context[field]or {})do values[k]=copy(v)end;if next(values)then out.context[field]=values end end
  if first.performance or last.performance then
@@ -79,6 +81,8 @@ function M.merge(first,last)
   for k,v in pairs(out.performance)do if type(v)=="number"and (k:find("max",1,true)or k:find("peak",1,true))then out.performance[k]=math.max(first.performance and first.performance[k]or 0,last.performance and last.performance[k]or 0)end end
   out.performance.lua_heap_kb_start=first.performance and first.performance.lua_heap_kb_start or last.performance and last.performance.lua_heap_kb_start;out.performance.lua_heap_kb_last=last.performance and last.performance.lua_heap_kb_last or first.performance and first.performance.lua_heap_kb_last
  end
+ -- the joined match is a saved match, kept as one is when it saves
+ if M.trim then M.trim(out)end
  return out
 end
 function M.coalesce(data,pause)

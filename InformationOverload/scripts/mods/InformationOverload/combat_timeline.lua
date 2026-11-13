@@ -83,6 +83,35 @@ function T.merge(a,b)
  for _,data in ipairs({a,b})do for _,s in ipairs(data.segments or {})do out.segments[#out.segments+1]=s end end
  return out
 end
+-- A saved segment keeps its hits as columns: the gap in ms since the hit before (the first from start_ms), reported damage, and which
+-- profile, attack type, result and flags, kept together in one list of the kinds the segment saw; useful damage only where it differs
+-- from reported, and which hits had it unknown. Only the running sequence goes. The mission under way and its checkpoint keep the tuples.
+function T.pack(s)
+ if type(s)~="table"or type(s.events)~="table"then return s end
+ local t,d,k,kinds,useful,unknown,ids={},{},{},{},{},{},{}
+ local prev=s.start_ms or 0
+ for i,e in ipairs(s.events)do
+  t[i]=e[1]-prev;prev=e[1];d[i]=e[2]
+  local key=tostring(e[4]).."|"..tostring(e[5]).."|"..tostring(e[6]).."|"..tostring(e[7])
+  local id=ids[key];if not id then kinds[#kinds+1]={e[4],e[5],e[6],e[7]};id=#kinds;ids[key]=id end;k[i]=id
+  if e[3]==false then unknown[#unknown+1]=i elseif e[3]~=e[2]then useful[#useful+1]={i,e[3]}end
+ end
+ s.hits={t=t,d=d,k=k,kinds=kinds,useful=useful,unknown=unknown};s.events,s.sequence=nil,nil;s.version=3
+ return s
+end
+-- a segment's hits as tuples {ms, reported, useful_or_false, profile, attack type, result, flags}, whichever way it keeps them
+local unpacked=setmetatable({},{__mode="k"})
+function T.events(s)
+ if type(s)~="table"then return nil end
+ if type(s.events)=="table"then return s.events end
+ local h=s.hits;if type(h)~="table"or type(h.t)~="table"then return nil end
+ local ev=unpacked[s];if ev then return ev end
+ ev={};local d,k,kinds,ms=h.d or {},h.k or {},h.kinds or {},s.start_ms or 0
+ for i,gap in ipairs(h.t)do ms=ms+gap;local kind=kinds[k[i]]or {};ev[i]={ms,d[i],d[i],kind[1],kind[2],kind[3],kind[4]or 0}end
+ for _,u in ipairs(h.useful or {})do local e=ev[u[1]];if e then e[3]=u[2]end end
+ for _,i in ipairs(h.unknown or {})do local e=ev[i];if e then e[3]=false end end
+ unpacked[s]=ev;return ev
+end
 -- Derive compact graph rows on demand, never store a duplicate bucket truth.
 -- keep, when given, picks which hits count, and shift, in milliseconds, moves where the buckets start
 function T.buckets(data,width,keep,shift)
@@ -90,7 +119,7 @@ function T.buckets(data,width,keep,shift)
  local out={}
  for si,s in ipairs(data.segments or {})do
   local rows={};local origin=(s.mission_origin_ms or s.start_ms)+(shift or 0)
-  for _,e in ipairs(s.events)do
+  for _,e in ipairs(T.events(s)or {})do
    if math.floor(e[7]/4)%2==0 and (not keep or keep(e,s))then
     local index=math.floor((e[1]-origin)/(width*1000))
     local row=rows[index]or {index=index,reported=0,useful=0,useful_unknown_reports=0,reports=0};rows[index]=row
@@ -109,7 +138,7 @@ function T.best_window(data,seconds,keep)
  local best={damage=0,seconds=seconds,dps=0,complete=true,completeness_basis="tracked_capture_errors_only; inspect observation intervals"}
  for si,s in ipairs(data.segments or {})do
   if s.coverage.dropped>0 or s.coverage.clock_errors>0 or (s.coverage.unresolved_target_reports or 0)>0 or (s.coverage.observation_gaps or 0)>0 then best.complete=false end
-  local events={};for _,e in ipairs(s.events)do if math.floor(e[7]/4)%2==0 and (not keep or keep(e,s))then events[#events+1]=e end end
+  local events={};for _,e in ipairs(T.events(s)or {})do if math.floor(e[7]/4)%2==0 and (not keep or keep(e,s))then events[#events+1]=e end end
   local first,sum=1,0
   for i,e in ipairs(events)do
    sum=sum+e[2]

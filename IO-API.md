@@ -270,6 +270,14 @@ One match with everything I/O saved about it: the damage tables, the timeline, i
 
 The fields follow I/O's frontend contract (`capabilities.frontend_contract` says which version). An `availability` table says which of the big parts the match has, since older matches may not have them all.
 
+Frontend contract 2 (I/O 1.0.4): a saved match keeps what I/O's pages read, and older saves are tidied to match. I/O packs some parts on disk, but `history_match` hands them out read back, in the shapes below.
+
+- `party_records.members[]` no longer has `enemy`, `armour`, `weapons` or `quality`. Kills and `best` are as before.
+- `combat_timeline` hits are `{time_ms, reported, useful_or_false, profile, attack_type, result, flags}`, without the eighth number, the running sequence; segments have no `sequence`. Its `streak_events` keep only resets whose cause is `knocked_down` or `died`. The streak counters are as before.
+- `enemy_kill_counts.members[]` keeps `personal` and `enemy_kills`, without `class`.
+- `damage` tallies no longer count `health_hits`.
+- `experimental` is gone from saved matches, and the old research blocks `talent_calibration`, `compact_damage_test`, `hyperviolence_poc`, `performance`, `damage_diagnostics` and `talent_test` with it.
+
 It gives `nil, "excluded"` for a match `history()` leaves out, and `nil, "unreadable match"` if the file is missing or damaged.
 
 ### run_damage

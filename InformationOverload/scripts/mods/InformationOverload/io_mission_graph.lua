@@ -57,8 +57,8 @@ function G.series(run,width,cat)
  if type(tl)~="table"or type(tl.segments)~="table"or #tl.segments==0 then return nil end
  -- a segment without its events, clock or coverage, as some older match files keep, is left out
  local use,n,o={},0,math.floor(G.origin(run)*1000+.5)
- for _,s in ipairs(tl.segments)do if type(s)=="table"and type(s.events)=="table"and type(s.start_ms)=="number"and type(s.last_ms)=="number"and type(s.coverage)=="table"then
-  use[#use+1]=s;n=n+#s.events end end
+ for _,s in ipairs(tl.segments)do local ev=Timeline.events(s);if ev and type(s.start_ms)=="number"and type(s.last_ms)=="number"and type(s.coverage)=="table"then
+  use[#use+1]=s;n=n+#ev end end
  if #use==0 then return nil end
  local boss=run.completion_markers and run.completion_markers.boss_death
  local c=cache[tl];if not c or c.n~=n or c.o~=o or c.boss~=boss then c={n=n,o=o,boss=boss};cache[tl]=c end

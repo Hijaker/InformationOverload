@@ -1,6 +1,7 @@
 -- Information Overload: the End Screen's Mission Debrief, read from the run just saved and the history before it, and laid out in the mockup's own units.
 local mod=get_mod("information_overload")
 local base="InformationOverload/scripts/mods/InformationOverload/"
+local Party;local function enemy_kills(p)if not Party and mod and mod.io_dofile then Party=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/party_records")end;return Party and Party.kills(p)or p.enemy_kills or {}end
 local Records=mod:io_dofile(base.."records")
 local Overview=mod:io_dofile(base.."io_overview")
 local Team=mod:io_dofile(base.."team_damage")
@@ -92,7 +93,7 @@ function B.model(tracker,m,run,seconds,basis,list,cls)
  local rows={};for i,l in ipairs({"Horde","Elites","Specials","Bosses"})do rows[i]={l,cur[i],n>0 and tot[i]/n or nil}end
  local none=total and math.max(0,total-sum)or 0;if none>0 then rows[5]={"No Type",none,n>0 and tot[5]/n or nil}end
  local by={};local ek=src.enemy_kill_counts or m.enemy_kill_counts
- for _,p in pairs(ek and ek.members or {})do if p.personal then for _,k in pairs(p.enemy_kills or {})do local l=k.label or "Unknown Enemy";by[l]=(by[l]or 0)+(k.count or 0)end end end
+ for _,p in pairs(ek and ek.members or {})do if p.personal then for _,k in pairs(enemy_kills(p))do local l=k.label or "Unknown Enemy";by[l]=(by[l]or 0)+(k.count or 0)end end end
  local most={};for l,v in pairs(by)do if v>0 then most[#most+1]={l,v}end end
  table.sort(most,function(a,b)if a[2]~=b[2]then return a[2]>b[2]end;return a[1]<b[1]end);for i=#most,4,-1 do most[i]=nil end
  M.kills={total=total or sum,rows=rows,n=n,most=most}

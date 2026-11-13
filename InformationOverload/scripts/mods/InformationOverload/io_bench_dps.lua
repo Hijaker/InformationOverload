@@ -7,17 +7,19 @@ mod.io_bench_live=mod.io_bench_live or setmetatable({},{__mode="k"})
 mod.io_bench_runs=mod.io_bench_runs or setmetatable({},{__mode="k"})
 local function shield(e)return math.floor(e[7]/4)%2==1 end
 local function last(tl)local segs=tl and tl.segments;return segs and segs[#segs]end
-function B.has_events(tl)for _,s in ipairs(tl and tl.segments or {})do if #s.events>0 then return true end end;return false end
+-- a segment's hits, as the mission keeps them or as a saved match packs them
+local function hits(s)return Timeline.events(s)or {}end
+function B.has_events(tl)for _,s in ipairs(tl and tl.segments or {})do if #hits(s)>0 then return true end end;return false end
 -- damage per second over the w seconds up to the last heartbeat, read back from the newest hit
 function B.window(tl,w)
  local s=last(tl);if not s then return 0 end
- local ev,from,sum=s.events,s.last_ms-w*1000,0
+ local ev,from,sum=hits(s),s.last_ms-w*1000,0
  for i=#ev,1,-1 do local e=ev[i];if e[1]<=from then break end;if not shield(e)then sum=sum+e[2]end end
  return sum/w
 end
 function B.last_hit(tl)
  local segs=tl and tl.segments or {};local seen=0
- for si=#segs,1,-1 do local ev=segs[si].events
+ for si=#segs,1,-1 do local ev=hits(segs[si])
   for i=#ev,1,-1 do local e=ev[i];if not shield(e)then return e[2]end;seen=seen+1;if seen>=2000 then return nil end end
  end
 end
@@ -25,7 +27,7 @@ end
 function B.live(tl,span,w,step)
  local s=last(tl);if not s then return {}end
  local now,wm,sm=s.last_ms,w*1000,step*1000;local t0=now-span*1000
- local ev=s.events;local lo=#ev+1
+ local ev=hits(s);local lo=#ev+1
  while lo>1 and ev[lo-1][1]>t0-wm do lo=lo-1 end
  local iv=s.intervals or {{s.start_ms,now}};local k=#iv
  while k>1 and iv[k-1][2]>=t0 do k=k-1 end
@@ -43,7 +45,7 @@ end
 -- one point a second over a 6 second window, the whole session from its first hit; a later segment follows on from the one before, and a gap in observation breaks the run
 function B.series(tl,w,step)
  w,step=w or 6,step or 1;local wm,sm,runs,off=w*1000,step*1000,{},0
- for _,s in ipairs(tl and tl.segments or {})do local ev=s.events
+ for _,s in ipairs(tl and tl.segments or {})do local ev=hits(s)
   if #ev>0 then local from,to=ev[1][1],math.min(s.last_ms,ev[#ev][1]+wm);local run,a,b,sum=nil,1,1,0;local iv=s.intervals or {{s.start_ms,s.last_ms}};local k=1
    for t=from+sm,to,sm do
     while b<=#ev and ev[b][1]<=t do local e=ev[b];if not shield(e)then sum=sum+e[2]end;b=b+1 end
@@ -71,8 +73,8 @@ local function digest(tl)local runs,dur=B.series(tl);return {best=Timeline.best_
 function B.live_digest(tl)
  local s=last(tl);if not s then return nil end
  local c=mod.io_bench_live[tl]
- if not c or c.segs~=#tl.segments or c.n~=#s.events then local ok,made=pcall(digest,tl)
-  if not ok then mod:error("I/O bench: %s",tostring(made));made={broken=true}end;c=made;c.segs=#tl.segments;c.n=#s.events;mod.io_bench_live[tl]=c end
+ if not c or c.segs~=#tl.segments or c.n~=#hits(s)then local ok,made=pcall(digest,tl)
+  if not ok then mod:error("I/O bench: %s",tostring(made));made={broken=true}end;c=made;c.segs=#tl.segments;c.n=#hits(s);mod.io_bench_live[tl]=c end
  return not c.broken and c or nil
 end
 -- a saved session decodes its file once; one that cannot be read keeps the dash

@@ -240,19 +240,31 @@ local function merge(target,value)
 end
 -- Keep compact reconstruction sources resident; large viewing/test data stays file-backed.
 local detail_fields={measurements=true,experimental=true,combat_timeline=true,party_records=true,damage=true,team_damage=true,performance=true,damage_diagnostics=true,compact_damage_test=true,talent_test=true,talent_calibration=true}
+-- What a match keeps in memory, its line: every field but these, large and read one match at a time, which stay in its file and
+-- are read when asked for, so a launch reads each patch's one file of lines and no match file.
+local file_fields={hyperviolence_poc=true,barrel_pops=true,friendly_fire_pairs=true,pickup_states=true}
+for k in pairs(detail_fields)do file_fields[k]=true end
+S.file_fields=file_fields
+local function in_line(k)return not file_fields[k]and k~="stats_excluded"end
 function S:release_details()self.detail_file=nil;self.detail_value=nil end
+-- a match file read elsewhere, held as if history_detail had read it
+function S:hold_details(file,value)self.detail_file=file;self.detail_value=value end
 function S:history_detail(desc)
- if self.detail_file~=desc.file then self.detail_value=assert(self:read(desc.file),"Missing match file");self.detail_file=desc.file end
+ if self.detail_file~=desc.file then
+  -- a match file gone or damaged since the launch is told once, and whoever asked fails as before, so nothing is saved without it
+  local ok,value=pcall(self.read,self,desc.file)
+  if not ok or type(value)~="table"then self.lost=self.lost or {}
+   if not self.lost[desc.file]then self.lost[desc.file]=true;if self.tell then self.tell("A saved match file could not be read, so that match's details can't be shown. Everything else works, and saving works.")end end
+   error(ok and "Missing match file"or value,0)
+  end
+  self.detail_value=value;self.detail_file=desc.file
+ end
  return self.detail_value
 end
 -- The End Screen's moment can live in the match's catalog entry rather than its file, so marking it writes no match, and no save compares it.
 local function without_end_screen(marks)
  if type(marks)~="table"or marks.end_screen==nil then return marks end
  local t={};for k,v in pairs(marks)do if k~="end_screen"then t[k]=v end end;return next(t)and t or nil
-end
--- what a later save compares a match with: copies of its resident fields, not the exclusion flag, which the launch sets from the policy
-local function snapshot_of(full,step)
- local t={};for k,v in pairs(full)do if k=="completion_markers"then t[k]=clone(without_end_screen(v),step)elseif not detail_fields[k]and k~="stats_excluded"then t[k]=clone(v,step)end end;return t
 end
 -- the damage figures pages read without a match's details, from the match or from a table of its damage, team damage and context
 local function damage_info(full)
@@ -263,27 +275,74 @@ local function damage_info(full)
  local useful,team_useful;if S.run_useful then useful,team_useful=S.run_useful(full)end
  return {io_damage_total=damage_total,io_damage_reported=reported,io_team_damage_total=team_total,io_damage_useful=useful or false,io_team_damage_useful=team_useful or false}
 end
-function S:history_load(desc,full,taken)
- full=full or assert(self:read(desc.file),"Missing match file");local summary,fields={},{}
- local marks=full.completion_markers;local in_file=type(marks)=="table"and marks.end_screen or nil
- if desc.end_screen~=nil and in_file==nil then if type(marks)~="table"then marks={};full.completion_markers=marks end;marks.end_screen=desc.end_screen end
- for k,v in pairs(full)do if detail_fields[k]then fields[k]=true else summary[k]=v end end
- -- a match written again from its file holds only its resident fields here, and the details copied across are named
- local known=taken and taken.known;if known then for k in pairs(known.fields)do fields[k]=true end end
+local FIGURES={"io_damage_total","io_damage_reported","io_team_damage_total","io_damage_useful","io_team_damage_useful"}
+-- The damage figures are worked out by the records' own rules as a match is saved. A change to those rules moves this number,
+-- and a launch then reads each match's file once to work them out again.
+S.FIGURES_VERSION=1
+-- a match's line as its patch's file of lines holds it: its line fields, the names of the fields left in its file, and the damage
+-- figures pages read, worked out from details that stay in the file
+local function line_of(full,figures)
+ local f,x,d={},{},{};for k,v in pairs(full)do if in_line(k)then f[k]=v elseif file_fields[k]then x[#x+1]=k end end
+ table.sort(x);for _,name in ipairs(FIGURES)do d[name]=figures[name]end
+ -- figures worked out without the records' rules are not kept, and the match's file is read for them at the next launch
+ return {f=f,x=x,d=d,r=S.run_damage_info and true or nil}
+end
+-- the line a save compares with what the match's file holds: these large fields, which nothing edits in place, by the table they
+-- hold, and the rest by a copy, as an edit inside them would change the copy's twin too
+local by_table={contributions=true,records=true,enemy_kill_counts=true,lethality_events=true,operative_clutches=true,boss_operatives=true,hyper_critical=true,leave_abuse=true,psyk_dps=true}
+local function line_snapshot(run,step,share)
+ local t={};for k,v in pairs(run)do if in_line(k)then if k=="completion_markers"then v=without_end_screen(v)end
+  if type(v)=="table"and not by_table[k]and not share then v=clone(v,step)end;t[k]=v end end
+ return t
+end
+local function line_same(run,snap,step)
+ for k,v in pairs(run)do if in_line(k)then local was=snap[k];if k=="completion_markers"then v=without_end_screen(v)end
+  if type(v)=="table"and not by_table[k]then if not equal(v,was,step)then return false end elseif v~=was then return false end end end
+ for k in pairs(snap)do if rawget(run,k)==nil then return false end end
+ return true
+end
+-- A match from its line: what pages read is in memory, and the rest is read from its file when asked for.
+function S:history_stub(desc,line,taken)
+ local summary,fields={},{}
+ for k,v in pairs(line.f or {})do summary[k]=v end;for _,k in ipairs(line.x or {})do fields[k]=true end
+ -- the line its file of lines is written from holds its own copy of what is compared by a copy, so an edit to the match, made through
+ -- it or through a table it shares with the mission it came from, never reaches that file; a save has those copies already, in its snapshot
+ local snap,f=taken and taken.snap,{}
+ for k,v in pairs(line.f or {})do if type(v)=="table"and not by_table[k]then if snap and k~="completion_markers"and snap[k]~=nil then v=snap[k]else v=clone(v)end end;f[k]=v end
+ line={f=f,x=line.x,d=line.d,r=line.r}
+ local marks=summary.completion_markers;local in_file=type(marks)=="table"and marks.end_screen or nil
+ if desc.end_screen~=nil and in_file==nil then local m={};if type(marks)=="table"then for k,v in pairs(marks)do m[k]=v end end;m.end_screen=desc.end_screen;summary.completion_markers=m end
  local store=self
  -- details are read by the name the reference holds, so a backup move that renames the file renames it there alone
- local ref={desc=clone(desc),end_screen=in_file,fields=fields};if taken then ref.end_screen=taken.end_screen end
- local mt=damage_info(known and taken.probe or full)
+ local ref={desc=clone(desc),end_screen=in_file,fields=fields,line=line};if taken then ref.end_screen=taken.end_screen end
+ local mt={};local d=line.d or {};for _,name in ipairs(FIGURES)do mt[name]=d[name]end
+ mt.io_damage_total=mt.io_damage_total or 0;mt.io_damage_useful=mt.io_damage_useful or false;mt.io_team_damage_useful=mt.io_team_damage_useful or false
  mt.__index=function(_,key)if fields[key]then return store:history_detail(ref.desc)[key]end end
+ -- a field left in its file and set to nothing is gone from the match, and the next save writes it without it
+ mt.__newindex=function(row,key,value)if value==nil and fields[key]then fields[key]=nil;ref.dropped=true else rawset(row,key,value)end end
  mt.io_materialize=function(row)
   local result={};for k,v in pairs(row)do result[k]=v end
   if next(fields)then local details=store:history_detail(ref.desc);for k in pairs(fields)do if rawget(row,k)==nil then result[k]=details[k]end end end
   return result
  end
+ mt.io_fields=fields;mt.io_file=function()return ref.desc.file end
+ -- the fields left in its file come into memory, so an edit to them is saved with the match
+ mt.io_pin=function(row)
+  if not next(fields)then return end;local details=store:history_detail(ref.desc)
+  for k in pairs(fields)do if not detail_fields[k]and rawget(row,k)==nil then rawset(row,k,details[k])end end
+ end
  setmetatable(summary,mt)
- -- Snapshot only the small resident source, never a second complete match.
- ref.summary=taken and taken.summary or snapshot_of(summary);self.history_refs[summary]=ref
+ ref.snap=taken and taken.snap or line_snapshot(f,nil,true);self.history_refs[summary]=ref
  return summary
+end
+-- a match decoded whole becomes a stub, keeping only its line; one written again from its file names the details copied across
+function S:history_load(desc,full,taken)
+ full=full or assert(self:read(desc.file),"Missing match file")
+ local known=taken and taken.known
+ local line=line_of(full,damage_info(known and taken.probe or full))
+ if known then local have={};for _,k in ipairs(line.x)do have[k]=true end;for k in pairs(known.fields)do if not have[k]then line.x[#line.x+1]=k end end;table.sort(line.x)end
+ -- the exclusion flag follows the policy, set at launch and by the replay, and stays with the match in memory
+ local run=self:history_stub(desc,line,taken);run.stats_excluded=full.stats_excluded;return run
 end
 function S:compact_history(view,dirty,late)
  view,dirty=view or self.values,dirty or self.dirty
@@ -302,7 +361,7 @@ function S:compact_history(view,dirty,late)
     if ref and ref.desc.file~=desc.file and taken and taken.known then
      -- one written again from its file keeps what it holds in memory and reads the rest from the file just written, which has
      -- every detail it had, and is compared later with the snapshot taken before that file was packed
-     ref.desc=clone(desc);ref.summary=taken.summary;ref.end_screen=taken.end_screen;for k in pairs(taken.known.fields)do ref.fields[k]=true end
+     ref.desc=clone(desc);ref.snap=taken.snap;ref.line=taken.line;ref.end_screen=taken.end_screen;for k in pairs(taken.known.fields)do ref.fields[k]=true end
      local mt=getmetatable(run);for k,v in pairs(damage_info(taken.probe))do mt[k]=v end
     elseif ref and ref.desc.file~=desc.file then local mt=getmetatable(run);local full=mt and mt.io_materialize and mt.io_materialize(run)or run;for k,v in pairs(full)do run[k]=v end;setmetatable(run,nil);self.history_refs[run]=nil end
    elseif run and not (ref and ref.desc.file==desc.file)then
@@ -322,9 +381,10 @@ end
 function S:history_descriptor(run)
  local ref=self.history_refs[run];if not ref then return nil end
  if ref.desc.file:sub(1,22)=="reconstruction_import/"then return nil end
- for field in pairs(detail_fields)do if rawget(run,field)~=nil then return nil end end
- local resident={};for k,v in pairs(run)do if k=="completion_markers"then resident[k]=without_end_screen(v)elseif k~="stats_excluded"then resident[k]=v end end
- if equal(resident,ref.summary,self:stepper())then return clone(ref.desc)end
+ -- a field held in memory beyond its line, set or brought in to be edited, is written with it
+ for k in pairs(run)do if file_fields[k]then return nil end end
+ if ref.dropped then return nil end
+ if ref.snap and line_same(run,ref.snap,self:stepper())then return clone(ref.desc)end
 end
 -- A missing or unreadable file is left out and listed in the catalog's missing list, which keeps
 -- it off the cleanup pass. Its entry or records chunk stays in the catalog until the mod writes
@@ -348,14 +408,38 @@ function S:dataset_load(entry,key)
  if lost and rebuild then data.history_cache_rebuild_required=true end
  local missing=kind and self.prior_missing or {}
  if entry.history_present then data.run_history={};local listed,ids={},{}
+  -- each patch's file of lines, read once, when the first of its matches not already held needs it, so a dataset listing the
+  -- records' own matches reads none; one that cannot be read leaves that patch to its match files and is written again
+  local lines,at,descs,tried={},{},{},{}
+  for p,d in pairs(entry.history_lines or {})do descs[p]=d end
+  local function stale(p)if descs[p]then self.lines_stale=self.lines_stale or {};self.lines_stale[descs[p].file]=true end end
+  local function lines_of(p)
+   if not tried[p]and descs[p]then tried[p]=true;local ok,v=pcall(self.resolve,self,descs[p])
+    if ok and type(v)=="table"and type(v.lines)=="table"and v.v==S.FIGURES_VERSION then lines[p]=v.lines else stale(p)end
+   end
+   return lines[p]
+  end
   for _,desc in ipairs(entry.history or {})do local again=listed[desc.file];listed[desc.file]=true
+   local p=tostring(desc.patch);at[p]=(at[p]or 0)+1
+   local shared=not again and self.launch_runs and self.launch_runs[desc.file]
+   local line;if not (shared and equal(shared.desc,desc))and lines_of(p)then line=lines[p][at[p]]
+    if not(type(line)=="table"and type(line.f)=="table"and type(line.d)=="table"and line.r and line.f.id==desc.id)then lines[p]=nil;line=nil;stale(p)end end
    -- a match file never changes, so a launch reads each once: an unfinished mission's records from before it list the same files as
    -- the records themselves and share their matches, as they did while it was played, rather than holding every match twice
-   local shared=not again and self.launch_runs and self.launch_runs[desc.file]
-   if shared and equal(shared.desc,desc)then data.run_history[#data.run_history+1]=shared.run;ids[tostring(desc.id)]=true else
+   if shared and equal(shared.desc,desc)then data.run_history[#data.run_history+1]=shared.run;ids[tostring(desc.id)]=true
+    -- one shared after it was read from its file has no line here either
+    if shared.read and key then self.lines_due=self.lines_due or {};self.lines_due[key]=true end
+   -- from its line, with only a check that its file is there
+   elseif line and (self.backup_sources and self.backup_sources[desc.file]or not self.a.exists or self.a.exists(desc.file))then
+    local run=self:history_stub(desc,line);data.run_history[#data.run_history+1]=run;ids[tostring(desc.id)]=true
+    if self.launch_runs and not again then self.launch_runs[desc.file]={desc=desc,run=run}end
+   elseif line then self:skip(key,desc,"Missing match file",kind and true)
+   else
     local read,full=pcall(self.read,self,desc.file)
     if read and type(full)=="table"then local run=self:history_load(desc,full);data.run_history[#data.run_history+1]=run;ids[tostring(desc.id)]=true
-     if self.launch_runs and not again then self.launch_runs[desc.file]={desc=desc,run=run}end
+     if self.launch_runs and not again then self.launch_runs[desc.file]={desc=desc,run=run,read=true}end
+     -- read from its file, it has no line yet, so the next save writes its patch's lines
+     if key then self.lines_due=self.lines_due or {};self.lines_due[key]=true end
     else self:skip(key,desc,read and "Missing match file"or full,kind and true)end
    end
   end
@@ -400,7 +484,10 @@ end
 function S:load_manifest(manifest)
  assert(type(manifest)=="table"and manifest.format==1 and type(manifest.entries)=="table","Invalid storage catalog")
  self.prior_missing=manifest.missing
- local values={};for key,entry in pairs(manifest.entries)do
+ -- the records first, so the datasets that list the same matches share them rather than reading their lines
+ local keys={};for key in pairs(manifest.entries)do keys[#keys+1]=key end
+ table.sort(keys,function(a,b)if (a=="lifetime_records_v1")~=(b=="lifetime_records_v1")then return a=="lifetime_records_v1"end;return a<b end)
+ local values={};for _,key in ipairs(keys)do local entry=manifest.entries[key]
   if datasets[key]then values[key]=self:entry_load(key,entry)else
    local ok,value=pcall(self.entry_load,self,key,entry)
    if ok then values[key]=value else
@@ -667,6 +754,7 @@ function S:open()
    local known={};for _,r in ipairs(manifest.missing or {})do known[r.file or r.reason]=true end
    for _,r in ipairs(self.skipped or {})do self.pending=true;if not known[r.file or r.reason]then self.unreported=self.unreported or {};self.unreported[r.file or r.reason]=true end end
    for key in pairs(self.restored or {})do self.dirty[key]=true;self.pending=true end
+   for key in pairs(self.lines_due or {})do self.dirty[key]=true;self.pending=true end;self.lines_due=nil
    self:open_checkpoint();self.launch_runs=nil;if index==2 then self.recovered=true;self.pending=true else self.index_verified=true end;return true end
  end end
  self.launch_runs=nil
@@ -809,7 +897,7 @@ function S:history_rewrite(run,ref,path)
  local spans=bytes and json_fields(bytes,function()self:pause(true)end)
  if not spans then return clone(ref.desc)end
  local resident,known,probe,parts={},{fields={}},{context=run.context},{}
- for k,v in pairs(run)do resident[k]=v;if detail_fields[k]then known.fields[k]=true;if k=="damage"or k=="team_damage"then probe[k]=v end end end
+ for k,v in pairs(run)do resident[k]=v;if file_fields[k]then known.fields[k]=true;if k=="damage"or k=="team_damage"then probe[k]=v end end end
  for k in pairs(ref.fields or {})do if rawget(run,k)==nil then
   local span=spans[k];if not span then return clone(ref.desc)end
   local text=bytes:sub(span[1],span[2]);known.fields[k]=true;parts[#parts+1]=self.a.json.encode(k)..":"..text
@@ -817,11 +905,15 @@ function S:history_rewrite(run,ref,path)
  end end
  bytes=nil;self:pause(true)
  local marks=resident.completion_markers
- if self.snapshots then self.snapshots[run]={summary=snapshot_of(resident,self:stepper()),end_screen=type(marks)=="table"and marks.end_screen or nil,known=known,probe=probe}end
+ if self.snapshots then
+  local line=line_of(resident,damage_info(probe));local have={};for _,k in ipairs(line.x)do have[k]=true end
+  for k in pairs(known.fields)do if not have[k]then line.x[#line.x+1]=k end end;table.sort(line.x)
+  self.snapshots[run]={snap=line_snapshot(resident,self:stepper()),line=line,end_screen=type(marks)=="table"and marks.end_screen or nil,known=known,probe=probe}
+ end
  self:immutable(path,resident,self:encode_sliced(resident,parts));return {file=path},true
 end
 function S:history_build(entry,data,kind,old,revision)
- entry.history={};entry.history_present=data.run_history~=nil
+ entry.history={};entry.history_present=data.run_history~=nil;local lines={}
  local old_history={};for _,desc in ipairs(old and old.history or {})do local id=desc.id;if id==nil then local ok,run=pcall(self.resolve,self,desc);id=ok and run.id end;old_history[tostring(id)]=desc end
  for i,run in ipairs(data.run_history or {})do
   local prefix=safe(run.context and run.context.patch).."/"..(kind=="general"and "match_history/"or kind=="solo"and "solo/match_history/"or "psykhanium/logs/")
@@ -834,14 +926,37 @@ function S:history_build(entry,data,kind,old,revision)
    written=not desc
    if written then local mt=getmetatable(run);local value=mt and mt.io_materialize and mt.io_materialize(run)or run
     -- taken before the file is packed, so a change made while a save spread over frames runs differs from it and is saved next time
-    if self.snapshots then local marks=value.completion_markers;self.snapshots[run]={summary=snapshot_of(value,self:stepper()),end_screen=type(marks)=="table"and marks.end_screen or nil}end
+    if self.snapshots then local marks=value.completion_markers;self.snapshots[run]={snap=line_snapshot(value,self:stepper()),line=line_of(value,damage_info(value)),end_screen=type(marks)=="table"and marks.end_screen or nil}end
     desc=self:descriptor(loaded_path(self,prefix..id.."-"..revision..".json"),value,(not ref or ref.desc.file:sub(1,22)=="reconstruction_import/")and previous or nil)
    end
   end
   local marks=run.completion_markers;local mark=type(marks)=="table"and marks.end_screen or nil
   desc.id=run.id;desc.patch=run.context and run.context.patch;desc.end_screen=not written and mark~=nil and not(ref and ref.end_screen==mark)and mark or nil
-  entry.history[#entry.history+1]=desc;self:pause()
+  entry.history[#entry.history+1]=desc
+  local taken=written and self.snapshots and self.snapshots[run];lines[#lines+1]=taken and taken.line or ref and ref.line or false;self:pause()
  end
+ self:history_lines(entry,old,kind,revision,lines)
+end
+-- Each patch's lines go in one file beside its matches, in the order the catalog lists them. A patch whose list is the same files as
+-- before keeps its file; one with a match written, added or gone is written again.
+local lines_folder={general="match_history/",solo="solo/match_history/",psykhanium="psykhanium/logs/"}
+function S:history_lines(entry,old,kind,revision,lines)
+ local function order(history)
+  local parts,out={},{};for _,d in ipairs(history or {})do local p=tostring(d.patch);local t=parts[p]or {};parts[p]=t;t[#t+1]=tostring(d.id).."="..tostring(d.file)..";"end
+  for p,t in pairs(parts)do out[p]=table.concat(t)end;return out
+ end
+ local was,now,by=order(old and old.history),order(entry.history),{}
+ for i,d in ipairs(entry.history)do local p=tostring(d.patch);by[p]=by[p]or {};by[p][#by[p]+1]=lines[i]end
+ entry.history_lines={}
+ for p,list in pairs(by)do
+  local kept=old and old.history_lines and old.history_lines[p]
+  if kept and was[p]==now[p]and not (self.lines_stale and self.lines_stale[kept.file])then entry.history_lines[p]=clone(kept)
+  else local whole=true;for i=1,#list do if not (list[i]and list[i].r)then whole=false end end
+   -- a match with no line, as one whose file could not be read, leaves its patch to the match files until it has one
+   if whole then entry.history_lines[p]=self:descriptor(loaded_path(self,safe(p).."/"..(lines_folder[kind]or kind.."/").."lines-"..revision..".json"),{v=S.FIGURES_VERSION,lines=list},nil);self:pause(true)end
+  end
+ end
+ if not next(entry.history_lines)then entry.history_lines=nil end
 end
 local function rewrite_files(entry,paths)
  if type(entry)~="table"then return end
@@ -1358,6 +1473,7 @@ function S.bind(mod,patch,adapter)
   local files={};for _,path in ipairs(active_adapter.skipped or {})do files[path]=true end;for id in pairs(store.unreported or {})do files[id]=true end
   local count=0;for _ in pairs(files)do count=count+1 end
   if count>0 then mod:echo("%d saved file(s) were missing or unreadable and were left out. Everything else loaded, and saving works.",count)end
+  store.tell=function(...)mod:echo(...)end
  end
  mod.io_data_get=function(key)return store:get(key)end
  mod.io_data_set=function(key,value)return store:set(key,value)end

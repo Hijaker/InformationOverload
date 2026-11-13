@@ -18,6 +18,40 @@ function H.kind(run)
  if run.full==false then return run.context and run.context.mode=="havoc"and "partial_unknown"or "late_join"end;return "full"
 end
 function H.enabled(run,policy)local kind=H.kind(run);return kind=="full"or (policy or {})[kind]~=false end
+-- A saved match keeps each context its record entries name once, in a list beside them, with the parts every one of those contexts
+-- shares kept once more as shared; an entry is {context number, name, value}, and an armour entry {context number, armour, name, value}.
+local function context_key(c)local keys={};for k in pairs(c)do keys[#keys+1]=k end;table.sort(keys);local out={}
+ for i,k in ipairs(keys)do local v=c[k];out[i]=k.."="..type(v)..":"..tostring(v)end;return table.concat(out,"|")end
+function H.pack(c)
+ if type(c)~="table"or c.version==2 or (type(c.best)~="table"and type(c.armour)~="table")then return c end
+ local contexts,ids,out={},{},{version=2,shared={},contexts={},best={},armour={}}
+ for _,field in ipairs({"best","armour"})do for _,e in ipairs(c[field]or {})do
+  -- an entry with anything beyond its context, name, value and armour is kept as it was
+  for k in pairs(e)do if k~="context"and k~="name"and k~="value"and k~="armour"then return c end end
+  if type(e.context)~="table"or e.name==nil or e.value==nil or field=="armour"and e.armour==nil then return c end
+ end end
+ local function id(ctx)local key=context_key(ctx);local n=ids[key];if not n then contexts[#contexts+1]=ctx;n=#contexts;ids[key]=n end;return n end
+ for _,e in ipairs(c.best or {})do out.best[#out.best+1]={id(e.context),e.name,e.value}end
+ for _,e in ipairs(c.armour or {})do out.armour[#out.armour+1]={id(e.context),e.armour,e.name,e.value}end
+ if contexts[1]then for k,v in pairs(contexts[1])do local all=true;for _,ctx in ipairs(contexts)do if ctx[k]~=v then all=false;break end end;if all then out.shared[k]=v end end end
+ for i,ctx in ipairs(contexts)do local own={};for k,v in pairs(ctx)do if out.shared[k]==nil then own[k]=v end end;out.contexts[i]=own end
+ for k,v in pairs(c)do if out[k]==nil then out[k]=v end end
+ return out
+end
+-- a match's best or armour entries as {context, name, value, armour}, from either shape; each has a context of its own, or, for a
+-- reader that only looks, entries naming one context share one table
+function H.entries(c,field,look)
+ if type(c)~="table"then return {}end
+ if c.version~=2 then return c[field]or {}end
+ local shared,contexts,out,made=c.shared or {},c.contexts or {},{},{}
+ local function context(n)if look and made[n]then return made[n]end
+  local t={};for k,v in pairs(shared)do t[k]=v end;for k,v in pairs(contexts[n]or {})do t[k]=v end;made[n]=t;return t end
+ for _,e in ipairs(c[field]or {})do
+  if field=="armour"then out[#out+1]={context=context(e[1]),armour=e[2],name=e[3],value=e[4]}
+  else out[#out+1]={context=context(e[1]),name=e[2],value=e[3]}end
+ end
+ return out
+end
 local function context(c)local out={};for _,k in ipairs({"mode","patch","difficulty","class","character","character_name","category","weapon","explosive","enemy","grenade","blo_variant","blo_talent_selected","blo_chance"})do out[k]=c[k]end;return out end
 local function deltas(before,after,path,out)
  for k,v in pairs(after or {})do local nextpath=clone(path);nextpath[#nextpath+1]=k
@@ -58,7 +92,7 @@ function H.discarded(tracker,m)
  local contribution=H.discard_contribution(tracker,m)
  if not contribution or #contribution.increments==0 and not next(m.boss_kills or {})then return end
  m.hidden_source_recorded=true;tracker.data.run_sequence=(tracker.data.run_sequence or 0)+1;tracker.data.run_history=tracker.data.run_history or {}
- local run={id=tracker.data.run_sequence,started_at=m.started_at,context=context(m.context),full=m.full,data_only=true,discarded=true,hidden_contributions=true,interrupted=m.interrupted,resumed=m.resumed,contributions=contribution,boss_kills=clone(m.boss_kills)};run.run_kind=H.kind(run);tracker.data.run_history[#tracker.data.run_history+1]=run
+ local run={id=tracker.data.run_sequence,started_at=m.started_at,context=context(m.context),full=m.full,data_only=true,discarded=true,hidden_contributions=true,interrupted=m.interrupted,resumed=m.resumed,contributions=contribution,boss_kills=clone(m.boss_kills)};run.run_kind=H.kind(run);if tracker.trim_saved then tracker.trim_saved(run)end;tracker.data.run_history[#tracker.data.run_history+1]=run
 end
 local derived={"running_tallies","boss_tallies","class_boss_tallies","class_events","class_overview","mode_streaks","class_mode_streaks","class_win_streaks","maelstrom_streaks"}
 -- A recount from the matches alone keeps the part of the baseline for patches with no saved match, which nothing else holds, and the Tracked Players the reset left, by which Restore knows who was untracked since.
@@ -118,8 +152,8 @@ function H.rebuild(R,baseline,data,policy,read_only,pause)
     for _,entry in ipairs(contribution.blo_contexts or {})do local bc=entry.context;r:rows_for(bc);r:initialize_blo_prefix(r:blo_buckets(bc));r.data.blo_weapons=r.data.blo_weapons or {};local patch=tostring(bc.patch);r.data.blo_weapons[patch]=r.data.blo_weapons[patch]or {};local child=R.new(r.data.blo_weapons[patch][bc.weapon]);child.blo_weapon_only=true;child:rows_for(bc);child:initialize_blo_prefix(child:blo_buckets(bc));r.data.blo_weapons[patch][bc.weapon]=child.data end
     for _,entry in ipairs(contribution.increments or {})do if entry.context then r:rows_for(entry.context)end;add(r.data,entry.path,entry.amount)end
     for _,entry in ipairs(contribution.blo_contexts or {})do local bc=entry.context;local bucket=r:blo_buckets(bc);bucket.best=math.max(bucket.best or 0,entry.best);local child=R.new(r.data.blo_weapons[tostring(bc.patch)][bc.weapon]);child.blo_weapon_only=true;if bc.blo_variant~="melee"then child:best(bc,"blo",entry.best)end;local cb=child:blo_buckets(bc);cb.best=math.max(cb.best or 0,entry.best);r.data.blo_weapons[tostring(bc.patch)][bc.weapon]=child.data end
-    for _,entry in ipairs(contribution.best or {})do if not (damage_reset and run.id<=damage_reset and damage_metrics[entry.name])then r:best(entry.context,entry.name,entry.value)end end
-    for _,entry in ipairs(contribution.armour or {})do if not (damage_reset and run.id<=damage_reset)then for _,row in ipairs(r:rows_for(entry.context))do row.armour_best=row.armour_best or {};local bucket=row.armour_best[entry.armour]or {best={},sources={}};row.armour_best[entry.armour]=bucket;if entry.value>(bucket.best[entry.name]or 0)then bucket.best[entry.name]=entry.value;bucket.sources[entry.name]=clone(entry.context)end end end end
+    for _,entry in ipairs(H.entries(contribution,"best"))do if not (damage_reset and run.id<=damage_reset and damage_metrics[entry.name])then r:best(entry.context,entry.name,entry.value)end end
+    for _,entry in ipairs(H.entries(contribution,"armour"))do if not (damage_reset and run.id<=damage_reset)then for _,row in ipairs(r:rows_for(entry.context))do row.armour_best=row.armour_best or {};local bucket=row.armour_best[entry.armour]or {best={},sources={}};row.armour_best[entry.armour]=bucket;if entry.value>(bucket.best[entry.name]or 0)then bucket.best[entry.name]=entry.value;bucket.sources[entry.name]=clone(entry.context)end end end end
     for i,segment in ipairs(contribution.kill_segments or {})do if i>1 then r:reset_kill_run(c)end;local kr=r:kill_run(c);for k,n in pairs(segment)do kr.current[k]=(kr.current[k]or 0)+n;kr.best[k]=math.max(kr.best[k]or 0,kr.current[k])end;for _,record in ipairs({r:mode_streak(c.patch,c.mode),r:class_mode_streak(c.patch,c.mode,c.class)})do record.current.kill_run=(record.current.kill_run or 0)+(segment.total or 0);record.best.kill_run=math.max(record.best.kill_run or 0,record.current.kill_run)end end
    end
    boss_tallies(r,run)

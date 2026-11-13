@@ -1,5 +1,7 @@
 local mod=type(get_mod)=="function"and get_mod("information_overload")
 if mod and mod.io_enemy_grouping then return mod.io_enemy_grouping end
+-- an operative's kills by enemy, as the mission keeps them or as a saved match packs them
+local Party;local function enemy_kills(p)if not Party and mod and mod.io_dofile then Party=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/party_records")end;return Party and Party.kills(p)or p.enemy_kills or {}end
 local G={}
 G.groups={{id="normal",label="Trash Enemies"},{id="elite",label="Elites"},{id="special",label="Specials"},{id="boss",label="Bosses"},{id="environment",label="Environment"}}
 G.subgroups={normal={{id="ranged",label="Ranged"},{id="bruiser",label="Bruiser"},{id="horde",label="Horde"}},elite={{id="ranged",label="Ranged"},{id="melee",label="Melee"}},boss={{id="monstrosity",label="Monstrosities"},{id="captain",label="Captains"},{id="daemonhost",label="Daemonhosts"}}}
@@ -39,7 +41,7 @@ function G.build(tracker,patch,mode,E,player)
     if own then result.all.downs=result.all.downs+(own.downs or 0);result.all.deaths=result.all.deaths+(own.deaths or 0)end
    end
    for id,p in pairs(run.enemy_kill_counts and run.enemy_kill_counts.members or {})do if not player and p.personal or player and victims[id]then
-    for _,k in pairs(p.enemy_kills or {})do local key=k.enemy..":"..tostring(k.subgroup);local old=result.killed[key]or {enemy=k.enemy,label=k.label,group=k.group,subgroup=k.subgroup,count=0};result.killed[key]=old;old.count=old.count+k.count end
+    for _,k in pairs(enemy_kills(p))do local key=k.enemy..":"..tostring(k.subgroup);local old=result.killed[key]or {enemy=k.enemy,label=k.label,group=k.group,subgroup=k.subgroup,count=0};result.killed[key]=old;old.count=old.count+k.count end
    end end
    for _,event in ipairs(run.lethality_events or {})do if (not player and event.personal or player and victims[event.victim])and (event.outcome=="down"or event.outcome=="direct_death"or event.outcome=="down_to_death")then
     -- One primary cause per event; environmental overlaps remain in raw history.

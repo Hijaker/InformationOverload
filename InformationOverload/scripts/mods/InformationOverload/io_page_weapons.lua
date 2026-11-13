@@ -6,6 +6,7 @@ local K=mod:io_dofile(base.."io_data_stats")
 local E=mod:io_dofile(base.."enemy_catalog")
 local Overview=mod:io_dofile(base.."io_overview")
 local Patch=mod:io_dofile(base.."game_patch")
+local History=mod:io_dofile(base.."history_recalculation")
 local Items=require("scripts/utilities/items")
 local Master=require("scripts/backend/master_items")
 local C,KC,DASH,CN,rgba,F=D.c,K.c,K.dash,K.class_names,D.rgba,D.font
@@ -46,7 +47,7 @@ local function build(view)
  for _,run in ipairs(K.scoped(view))do
   local c=run.context;local L=c.operative_loadouts;local lo=L and (L[tostring(c.character)]or c.character_name and L[c.character_name])
   if type(lo)~="table"or not (lo.melee or lo.ranged)then nolo=nolo+1 else nm=nm+1
-   local best=run.contributions and run.contributions.best or {};local tmpl={}
+   local best=History.entries(run.contributions,"best",true);local tmpl={}
    for _,e in ipairs(best)do local x=e.context;if x and x.weapon and not x.grenade and lo[x.category]and not tmpl[x.category]and weapon(x.weapon)==lo[x.category]then tmpl[x.category]=x.weapon end end
    local kb;for _,e in ipairs(best)do if e.name=="kills"and e.context and (not kb or e.value>kb.value)then kb=e end end
    for _,slot in ipairs({"melee","ranged"})do local name=lo[slot]

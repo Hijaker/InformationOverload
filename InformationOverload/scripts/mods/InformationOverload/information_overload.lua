@@ -19,6 +19,9 @@ MissionSegments.experimental_merge=mod:io_dofile("InformationOverload/scripts/mo
 local HistoryRecalculation=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/history_recalculation")
 Records.capture_contributions=HistoryRecalculation.capture;Records.capture_discarded=HistoryRecalculation.discarded;Records.patch_carry=Patch.carry
 Records.departure_finalize=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/departure_tracking").finalize
+-- what a saved match keeps, as it saves and when two saved parts of one mission are joined
+local Saved=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/saved_match")(mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/combat_timeline"),PartyRecords,HistoryRecalculation)
+Records.trim_saved=Saved.trim;MissionSegments.entries=HistoryRecalculation.entries;MissionSegments.trim=Saved.trim
 local Missions = require("scripts/settings/mission/mission_templates")
 local SpecialRules = require("scripts/settings/ability/special_rules_settings").special_rules
 local function localized(key)
@@ -523,6 +526,19 @@ local function update_stats()
         elseif tracker.mission and storage.prepare_baseline then storage:prepare_baseline(tracker.mission.data_before)end
     end
 end
+-- saves from before 1.0.4 are tidied a little at a time on the Mourningstar, while nothing else is saving or reading the history
+local SaveTidy=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/save_tidy")(storage,Saved,
+ function()return {lifetime_records_v1=tracker,psykhanium_logs_v1=psykhanium_logs,solo_records_v1=solo_tracker}end,
+ function(dropped,cut)if mod.info then mod:info("I/O tidied older saves: research left %d matches, and %d were packed",dropped,cut)end end)
+local tidy_wait=0
+local function tidy(dt)
+ if SaveTidy.done then return end
+ if not hub_ready()or hub_wait<3 or tracker.mission or solo_tracker.mission or collectors and collectors:partial_pending()or rebuild_job or prepare_job
+  or not storage.ready or storage.job or storage.pending or storage.journal_active or tracker.dirty or solo_tracker.dirty or psykhanium_logs.dirty then tidy_wait=0;return end
+ tidy_wait=tidy_wait+dt;if tidy_wait<.5 and not SaveTidy.busy then return end;tidy_wait=0
+ if SaveTidy.step()then click_rest=true end
+end
+local tidy_off=false
 mod.update = function(dt)
     dt_now=dt
     if mod.io_step_history_import then mod.io_step_history_import()end
@@ -544,6 +560,7 @@ mod.update = function(dt)
     if not frame("History",update_derived_cache,dt)then rebuild_job=nil;prepare_job=nil;cache_failed=rebuild_inputs()end
     -- the warm-ups are only a head start, so one that fails stops until the next mission rather than failing every frame
     if not warm_off and not (frame("Warm-up",warm_bench,dt)and frame("Warm-up",warm_hidden))then warm_off=true end
+    if not tidy_off and not frame("Tidy",tidy,dt)then tidy_off=true end
     frame("Save",update_stats)
 end
 local function boundary()
@@ -1388,7 +1405,7 @@ end
 mod:command("io_reset", "Move all saved statistics into a backup, after a confirmation", mod.io_request_reset)
 mod:command("io_restore", "Bring back the latest backup, after a confirmation", function()mod.io_request_restore(false)end)
 
-mod.version="1.0.3"
+mod.version="1.0.4"
 
 
 -- Draft integration seam for the data interface; no UI/navigation changes.
