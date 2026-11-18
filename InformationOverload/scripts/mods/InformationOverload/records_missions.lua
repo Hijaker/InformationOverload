@@ -48,9 +48,7 @@ end
 function Records:psyker_explosion()
     local m = self.mission
     if not m or m.context.class ~= "psyker" or m.context.crystalline_will then return false end
-    m.exploded = true
-    self:class_mode_streak(m.context.patch,m.context.mode,m.context.class).current.personal_peril_safe=0
-    self:mission_row(m.context).psyker_safe_current = 0
+    m.exploded = true -- the streaks reset when the run is counted, so a data-only run leaves them
     self.dirty = true
     return true
 end
@@ -79,7 +77,7 @@ function Records:save_run(m,victory,training_test)
     -- a saved burst keeps its totals; who it hit and when only matter while it runs
     for _,e in pairs(self.data.run_history[#self.data.run_history].class_events or {})do for _,burst in ipairs(e.bursts or {})do burst.targets=nil;burst.at=nil end end
     -- its party records and combat timeline keep what its pages read
-    if Records.trim_saved then Records.trim_saved(self.data.run_history[#self.data.run_history])end
+    if Records.trim_saved then Records.trim_saved(self.data.run_history[#self.data.run_history],self)end
     self:cache_class_run(self.data.run_history[#self.data.run_history])
     local run_id=self.data.run_sequence
     for _,update in ipairs(m.enemy_updates or {}) do local hit=update.row.enemy_hits and update.row.enemy_hits[update.enemy];if hit and hit.damage==update.value then hit.run_id=run_id end end
@@ -118,14 +116,15 @@ function Records:finish_mission(completed, victory, explicitly_count_partial)
     self:record_class_overview({context=m.context,victory=victory,data_only=m.data_only,kills=m.kills,damage=m.damage,team_damage=m.team_damage,kill_categories=m.kill_categories,clutches=m.clutches})
     self:record_ally_overview({context=m.context,victory=victory,data_only=m.data_only,operative_clutches=m.operative_clutches})
     self:save_run(m,victory)
+    if m.data_only then self.dirty=true;return true end -- data-only runs stay out of the row streaks, as a rebuild leaves them
     local row = self:mission_row(m.context)
     row.win_current = victory and (row.win_current or 0) + 1 or 0
     row.loss_current = not victory and (row.loss_current or 0) + 1 or 0
     row.best.win_streak = math.max(row.best.win_streak or 0, row.win_current)
     row.best.loss_streak = math.max(row.best.loss_streak or 0, row.loss_current)
     self.dirty = true
-    if m.context.class == "psyker" and not m.context.crystalline_will and not m.exploded and not m.data_only then
-        row.psyker_safe_current = (row.psyker_safe_current or 0) + 1
+    if m.context.class == "psyker" and not m.context.crystalline_will and not m.data_only then
+        row.psyker_safe_current = not m.exploded and (row.psyker_safe_current or 0) + 1 or 0
         row.best.psyker_safe_missions = math.max(row.best.psyker_safe_missions or 0, row.psyker_safe_current)
     end
     if not victory then
@@ -139,7 +138,7 @@ function Records:finish_mission(completed, victory, explicitly_count_partial)
         if not m.failed[event] then
             row[definition.current] = (row[definition.current] or 0) + 1
             row.best[definition.best] = math.max(row.best[definition.best] or 0, row[definition.current])
-        end
+        else row[definition.current] = 0 end
     end
     self.dirty = true
     return true

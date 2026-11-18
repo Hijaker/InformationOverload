@@ -57,5 +57,5 @@ function O.name(row,known,R)
  if not row.class then return "Name unavailable"end
  return R and R.class_name and R.class_name(row.class)or tostring(row.class),true
 end
-function O.label(row,R,known)local name,class=O.name(row,known,R);return name..(class and ""or " ("..R.class_name(row.class)..")")..(row.late_join and " - late-joined"or "")end
+function O.label(row,R,known)local name,class=O.name(row,known,R);return name..(class and ""or " ("..R.class_name(row.class)..")")end
 return O

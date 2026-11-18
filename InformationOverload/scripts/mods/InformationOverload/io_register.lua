@@ -44,7 +44,7 @@ return function(mod)
    if not o.own_key and sb.S.release(sb.state,os.clock())=="panel"and not ui:view_active(name)then mod.io_hold_icons();ui:open_view(name,nil,false,false,nil,{use_transition_ui=false,io_tap=not fin})end
    return
   end
-  local r=o.own_key and "toggle"or sb.S.press(sb.state,os.clock(),ui:view_active(name),sb.in_mission(),sb.hold_layout and sb.hold_layout(fin~=nil)or o.layout,sb.S.key_mode(o.key,fin~=nil),sb.context and sb.context())
+  local r=o.own_key and "toggle"or sb.S.press(sb.state,os.clock(),ui:view_active(name),sb.in_mission(),sb.hold_layout and sb.hold_layout(fin~=nil)or o.layout,sb.S.key_mode(sb.key_choice and sb.key_choice()or o.key,fin~=nil),sb.context and sb.context())
   if r=="close"or r=="toggle"then
    -- in a mission the panel opens without the intro, whether or not the scoreboard is on
    if not ui:view_active(name)and not(o.own_key and fin)and sb.live and sb.live()then mod.io_hold_icons();ui:open_view(name,nil,false,false,nil,{use_transition_ui=false,io_tap=true})else mod.toggle_information_overload()end
@@ -54,7 +54,7 @@ return function(mod)
   local sb,ui=mod.io_scoreboard,Managers.ui;if not sb or not ui then return end
   if down==false then sb.S.release(sb.state,os.clock());return end
   if ui:view_active(name)then return end
-  local o,fin=sb.options(),sb.finished()~=nil;sb.S.press(sb.state,os.clock(),false,sb.in_mission(),sb.hold_layout and sb.hold_layout(fin)or o.layout,sb.S.key_mode(o.key,fin,true),sb.context())
+  local o,fin=sb.options(),sb.finished()~=nil;sb.S.press(sb.state,os.clock(),false,sb.in_mission(),sb.hold_layout and sb.hold_layout(fin)or o.layout,sb.S.key_mode(sb.key_choice and sb.key_choice()or o.key,fin,true),sb.context())
  end
  mod:command("io","Open or close Information Overload",mod.toggle_information_overload)
  mod:command("io_dashboard","Open or close Information Overload",mod.toggle_information_overload)

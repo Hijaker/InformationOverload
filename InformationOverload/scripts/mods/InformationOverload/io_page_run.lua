@@ -15,6 +15,7 @@ local Identity=mod:io_dofile(base.."player_identity")
 local Timeline=mod:io_dofile(base.."combat_timeline")
 local KillStreaks=mod:io_dofile(base.."kill_streaks")
 local Graph=mod:io_dofile(base.."io_mission_graph")
+local Build=mod:io_dofile(base.."io_build_page")
 local HitStreak,HealthStreak=KillStreaks.hit,KillStreaks.health
 -- who can be tracked on the Friends page: anyone known by id who isn't already a Steam friend
 local function trackable(tracker,c,actor)
@@ -24,7 +25,7 @@ local function trackable(tracker,c,actor)
 end
 local C,DASH,fmt=D.c,Overview.dash,Data.fmt
 local ARMOUR={unarmored="Unarmoured",disgustingly_resilient="Infested",berserker="Maniac",resistant="Unyielding",armored="Flak",super_armor="Carapace",unknown="Unknown"}
-local TABS={{"overview","Overview"},{"damage","Damage"},{"ff","Friendly Fire"},{"deaths","Deaths"},{"atk","Attacks"},{"build","Builds"}}
+local TABS={{"overview","Overview"},{"endscreen","End Screen"},{"build","Build"},{"damage","Damage"},{"ff","Friendly Fire"},{"deaths","Deaths"},{"atk","Attacks"}}
 local CATS={{"total","All Damage","Total Damage"},{"melee","Melee","Melee Damage"},{"ranged","Ranged","Ranged Damage"},{"dot","Damage Over Time","Damage Over Time"},{"dot_bleed","Bleed","Bleed"},{"dot_burn","Burn","Burn"},{"dot_soulblaze","Soulblaze","Soulblaze"},{"dot_toxin","Toxin","Toxin"}}
 local DOTS={{"dot_bleed","Bleed"},{"dot_burn","Burn"},{"dot_soulblaze","Soulblaze"},{"dot_toxin","Toxin"},{"dot_other","Other DoT"}}
 local function pct(n,d)if not d or d<=0 then return DASH end;return string.format("%.1f%%",100*n/d)end
@@ -45,21 +46,39 @@ end
 -- a weapon by its name; a best hit saves the readable name already, which stands as it is if the lookup knows nothing of it
 local function weapon(id)if not id then return nil end;local ok,n=pcall(mod.io_weapon_name,id);if ok and type(n)=="string"and n~=""and n~="Unknown weapon"then return n end
  if type(id)=="string"and id:find("[%s%u]")then return id end end
+-- the first matches saved the game's placeholder for a modifier it could not name, so the game is asked again and one it still cannot name is left off
+local function modifier(id,name)
+ if type(name)~="string"or not name:find("<unlocalized",1,true)then return name end
+ local ok,label=pcall(function()
+  local m=require("scripts/settings/mutator/mutator_templates")[id];local s=require("scripts/settings/circumstance/circumstance_templates")[id]
+  local key=type(m)=="table"and m.display_name or type(s)=="table"and (s.display_name or type(s.ui)=="table"and s.ui.display_name)
+  if type(key)=="string"then local l=Localize(key);if l~=key then return l end end
+ end)
+ if ok and type(label)=="string"and label~=""and not label:find("<unlocalized",1,true)then return label end
+end
+local function damage_types(data,player,over)
+ local rows={}
+ for _,e in ipairs({{"total","All Damage"},{"melee","Melee"},{"ranged","Ranged"},{"dot","Damage Over Time"},{"boss","Boss Damage"}})do
+  local b=Team.summary(data,player,e[1])
+  if b.reported>0 then rows[#rows+1]={e[2],fmt(over and b.reported or b.useful).." · "..pct(b.overkill,b.reported).." Overkill"}end
+ end
+ return rows
+end
 local function shape(tracker,run)
  local c=run.context;local m={map=tracker:run_mission_name(c),faction=c.mode=="havoc"and Faction.label(c.havoc_faction)or nil}
  m.scope={{"Mode:",Overview.mode_names[c.mode]or DASH},{"Difficulty:",Overview.diff_label(c)},{"Patch:",c.patch and Patch.display(c.patch)or DASH}}
  local info={{"Date",run.started_at and H.timestamp(run.started_at)or DASH},{"Match","#"..tostring(run.id or DASH)},{"Result",(run.victory and "Victory"or "Defeat")..(run.full==false and ", Partial Mission"or "")},
   {"Difficulty",Overview.diff_label(c)},{"Your Class",Overview.class_names[c.class]or DASH}}
- local mods={};for _,name in pairs(c.modifiers or {})do if type(name)=="string"and name~=""and not name:find("Fading",1,true)then mods[#mods+1]=name end end;table.sort(mods)
+ local mods={};for id,name in pairs(c.modifiers or {})do name=modifier(id,name);if type(name)=="string"and name~=""and not name:find("Fading",1,true)then mods[#mods+1]=name end end;table.sort(mods)
  if #mods>0 then info[#info+1]={"Modifiers",table.concat(mods,", ")}end
  local marks,opts=run.completion_markers or {},mod.io_display_options and mod.io_display_options()or {}
  local completion=Times.completion(run)
  if run.victory and completion and type(completion.seconds)=="number"then
-  local t=completion;local chosen=t.source=="mission_clock"and (opts.boss_map_timing and marks.boss_death or marks.victory_request or marks.victory_transition)
+  local t=completion;local chosen=t.source=="mission_clock"and (opts.boss_map_timing and Times.boss_death(run)or marks.victory_request or marks.victory_transition or marks.win_condition~=marks.boss_death and marks.win_condition)
   local tip=t.source=="backend"and {"Clear Time","The mission's completion time, as the server reports it.","Every time is worked out this way, so results stay consistent across hardware, latency and each map's win conditions."}
    or t.source=="manual"and {"Clear Time","This time was typed in with Set Mission Time.","A Havoc 40 win not played from the start has no clock of its own."}
    or {"Clear Time","This match was saved before the server's time was recorded, so its time comes from the mission's own clock."}
-  info[#info+1]={"Clear Time",chosen and stamp(run,chosen)or Times.format(t.seconds),tip=tip}
+  info[#info+1]={"Clear Time",chosen and stamp(run,chosen)or t.source=="mission_clock"and DASH or Times.format(t.seconds),tip=tip}
  end
  -- older matches kept no combat timeline; the match file is the one Team.from_run reads below
  local health=Timeline.best_health_streak(run);info[#info+1]={HealthStreak.title,health and tostring(health)or "Not Recorded",tip=HealthStreak.tip}
@@ -75,9 +94,7 @@ local function shape(tracker,run)
   -- the player's own damage as the Damage tab gives it, for the graph's Your Damage; every entry that is the player, as one keyed by its unit before its character was known
   local me,yours=tostring(c.character),0;for id,p in pairs(data.members or {})do if id~="unknown_operative"and (p.personal==true or tostring(id)==me)then yours=yours+Team.summary(data,id,"total").reported end end;if yours>0 then m.you_reported=yours end
   local total=Team.summary(data,nil,"total");m.team={}
-  for _,e in ipairs({{"total","All Damage"},{"melee","Melee"},{"ranged","Ranged"},{"dot","Damage Over Time"},{"boss","Boss Damage"}})do local b=Team.summary(data,nil,e[1])
-   if b.reported>0 then m.team[#m.team+1]={e[2],fmt(over and b.reported or b.useful).." · "..pct(b.overkill,b.reported).." Overkill"}end
-  end
+  m.team=damage_types(data,nil,over)
   if total.unknown>0 then m.team[#m.team+1]={"Uncertainty",100*total.unknown/total.reported<0.1 and "<0.1%"or pct(total.unknown,total.reported)}end
   m.share={};for _,p in ipairs(m.people)do local u=Team.summary(data,p.id,"total").useful;if u>0 then m.share[#m.share+1]={name=p.me and "You"or p.name,me=p.me,v=u}end end
   table.sort(m.share,function(a,b)if a.me~=b.me then return a.me end;return a.v>b.v end);m.useful=total.useful
@@ -88,7 +105,7 @@ local function shape(tracker,run)
 end
 local function available(run)
  local pr=run.party_records
- return {overview=true,damage=Team.from_run(run)~=nil,ff=run.incidents~=nil or run.friendly_fire_pairs~=nil,
+ return {overview=true,endscreen=run.context~=nil and not run.context.psykhanium_log,damage=Team.from_run(run)~=nil,ff=run.incidents~=nil or run.friendly_fire_pairs~=nil,
   build=true,deaths=run.incidents~=nil or run.lethality_events~=nil or run.pickup_pairs~=nil,atk=pr~=nil and type(pr.members)=="table"and next(pr.members)~=nil}
 end
 -- Damage: one total, its parts and the armour split, for the team or one operative
@@ -97,7 +114,7 @@ local function damage_shape(tracker,run,sel)
  local c=run.context;local me=tostring(c.character);local d={opts={},snap=data.basis=="local_attack_snapshots"}
  if not d.snap then d.opts[1]={head="Whole Team"};for _,e in ipairs(CATS)do if Team.summary(data,nil,e[1]).reported>0 then d.opts[#d.opts+1]={value="team:"..e[1],label=e[2],shown="Team: "..e[2],title=e[3],ind=true}end end end
  local people={};for id,p in pairs(data.members or {})do if id~="unknown_operative"and Team.summary(data,id,"total").reported>0 then local you=p.personal==true or tostring(id)==me
-  people[#people+1]={value="p:"..tostring(id),id=id,label=People.name(c,id,tracker,p.class)..(you and " (You)"or ""),you=you,ind=not d.snap,title="Total Damage"}end end
+  people[#people+1]={value="p:"..tostring(id),id=id,label=People.name(c,id,tracker,p.class),you=you,ind=not d.snap,title="Total Damage"}end end
  table.sort(people,you_first);if #people>0 and not d.snap then d.opts[#d.opts+1]={head="One Operative"}end
  for _,p in ipairs(people)do p.shown=p.label;d.opts[#d.opts+1]=p end
  for _,o in ipairs(d.opts)do if not o.head and o.value==sel then d.cur=o end end
@@ -105,6 +122,15 @@ local function damage_shape(tracker,run,sel)
  if not d.cur then return d end
  local player,cat=nil,"total";if d.cur.id~=nil then player=d.cur.id else cat=d.cur.value:sub(6)end
  local b=Team.summary(data,player,cat);d.title=d.cur.title
+ -- the team's view: each operative's useful damage of the kind picked, biggest first, each row opening that operative's view
+ if not player then d.ops={};local all=0
+  for _,p in ipairs(people)do local u=Team.summary(data,p.id,cat).useful;if u>0 then d.ops[#d.ops+1]={label=p.label,value=p.value,you=p.you,u=u};all=all+u end end
+  table.sort(d.ops,function(x,y)return x.u>y.u end);for _,o in ipairs(d.ops)do o.share=all>0 and o.u/all or 0 end
+ end
+ if player then
+  local opts=mod.io_display_options and mod.io_display_options()or {};d.types={}
+  for _,row in ipairs(damage_types(data,player,opts.includes_overkill))do d.types[#d.types+1]={l=row[1],v=row[2]}end
+ end
  d.total={{l="Damage",v=fmt(b.reported)},{l="Useful Damage",v=fmt(b.useful)},{l="Overkill",v=fmt(b.overkill)},{l="Overkill %",v=pct(b.overkill,b.reported)}}
  if b.unknown>0 then d.total[#d.total+1]={l="Uncertainty",v=100*b.unknown/b.reported<0.1 and "<0.1%"or pct(b.unknown,b.reported)}end
  local recorded,keys={},{}
@@ -154,7 +180,7 @@ end
 local BEST={{"single_hit","Biggest Single-Target Hit"},{"melee_cleave","Biggest Melee Cleave"},{"explosive_single_hit","Biggest Single Explosion (One Target)"}}
 local function attack_shape(tracker,run,sel)
  local members=run.party_records and run.party_records.members or {};local c=run.context;local me=tostring(c.character)
- local a={opts={}};for id,p in pairs(members)do local you=p.personal==true or tostring(id)==me;a.opts[#a.opts+1]={value=tostring(id),key=id,label=People.name(c,id,tracker,p.class)..(you and " (You)"or ""),you=you}end
+ local a={opts={}};for id,p in pairs(members)do local you=p.personal==true or tostring(id)==me;a.opts[#a.opts+1]={value=tostring(id),key=id,label=People.name(c,id,tracker,p.class),you=you}end
  table.sort(a.opts,you_first);for _,o in ipairs(a.opts)do if o.value==sel then a.cur=o end end;a.cur=a.cur or a.opts[1]
  if not a.cur then return a end
  local p=members[a.cur.key]or {};local k=p.kills or {}
@@ -164,6 +190,8 @@ local function attack_shape(tracker,run,sel)
  for _,e in ipairs({{"horde_melee","Melee Horde"},{"horde_ranged","Ranged Horde"},{"elite","Elites"},{"special","Specials"},{"boss","Bosses"}})do a.kills[#a.kills+1]={l=e[2],v=Overview.commas(k[e[1]]or 0),ind=true}end
  if kills>typed then a.kills[#a.kills+1]={l="No Type",v=Overview.commas(kills-typed),ind=true}end
  a.best={};for _,e in ipairs(BEST)do local r=p.best and p.best[e[1]]
+  -- a match saved before explosions were kept apart holds its biggest explosion as its single-target hit too
+  if r and e[1]=="single_hit"and r.category=="explosion"then r=nil end
   if r and type(r.value)=="number"then local rows={{l="Damage",v=fmt(r.value)}}
    local named=weapon(r.weapon);if named then rows[#rows+1]={l="Weapon",v=named}end
    if r.enemy then rows[#rows+1]={l="Enemy",v=enemy(r.enemy)}end
@@ -175,6 +203,20 @@ local function attack_shape(tracker,run,sel)
  return a
 end
 local function card_h(n)return 52+n*26 end
+-- a value wider than its 300 goes on as many rows as it needs, broken between words, so a long list of modifiers never runs into the next row
+local function wrapped(view,rows)
+ local out={}
+ for _,r in ipairs(rows)do local s=tostring(r[2])
+  if view:_w(s,16)<=300 then out[#out+1]=r else
+   local line,first="",true
+   for word in s:gmatch("%S+")do local try=line==""and word or line.." "..word
+    if line~=""and view:_w(try,16)>300 then out[#out+1]=first and {r[1],line,tip=r.tip}or {"",line,more=true};first=false;line=word else line=try end
+   end
+   if line~=""then out[#out+1]=first and {r[1],line,tip=r.tip}or {"",line,more=true}end
+  end
+ end
+ return out
+end
 local function lead(view,cv,text,h)return {wide=true,h=h or 24,gap=6,draw=function(x,y,w)cv:text(text,x,y,w,24,14,C.muted,"left",D.font.medium)end}end
 local function kv_card(view,cv,title,rows,sub,col)return {col=col,h=card_h(#rows),draw=function(x,y,w)view:_card(cv,x,y,w,card_h(#rows),title,sub);Data.kv(view,cv,x,y+45,w,rows)end}end
 local function overview(view,cv,m,run)
@@ -183,8 +225,8 @@ local function overview(view,cv,m,run)
  -- the damage graph spans the top, and both columns start under it
  local top=D.sheet;local gh=Graph.overview(view,cv,run,L,top,D.width,m.you_reported);if gh then top=top+gh+10 end
  local y=top
- local h=card_h(#m.info);view:_card(cv,L,y,W,h,m.map,m.faction);view:_rows(cv,L,y+45,W,m.info)
- if view._tip then for i,r in ipairs(m.info)do if r.tip then view:_tip("base",L+25,y+45+(i-1)*26,W-50,26,r.tip)end end end;y=y+h+10
+ local info=wrapped(view,m.info);local h=card_h(#info);view:_card(cv,L,y,W,h,m.map,m.faction);view:_rows(cv,L,y+45,W,info)
+ if view._tip then for i,r in ipairs(info)do if r.tip then view:_tip("base",L+25,y+45+(i-1)*26,W-50,26,r.tip)end end end;y=y+h+10
  if m.armour and #m.armour>0 then
   h=card_h(#m.armour)+24;view:_card(cv,L,y,W,h,"Armour Breakdown");cv:text("Useful damage only, without overkill.",L+36,y+42,W-60,20,14,C.muted,"left",D.font.medium)
   local top=m.armour[1][2]
@@ -238,6 +280,16 @@ local function damage(view,cv,popup,d,st,run)
  Data.dropdown(view,cv,popup,"io_run_det",1010,D.row2,280,"Detail:",d.cur.shown,opts,function(v)st.det=v end)
  view:_sheet(cv,D.sheet)
  local sub=d.snap and "Weapon Hits Only"or nil;local cards={kv_card(view,cv,d.title,d.total,sub,1)}
+ if d.types and #d.types>0 then cards[#cards+1]=kv_card(view,cv,"Damage By Type",d.types,sub,2)end
+ if d.ops and #d.ops>0 then local n=#d.ops;local h=card_h(math.max(n,#d.total))
+  cards[#cards+1]={col=2,h=h,draw=function(x,y,w)view:_card(cv,x,y,w,h,"By Operative",sub)
+   for i,o in ipairs(d.ops)do local ry=y+45+(i-1)*26;local bx,bw=x+250,w-250-180
+    view:_hit("base",x+15,ry,w-30,26,function()st.det=o.value end,{bg=C.fill_h})
+    cv:text(view:_fit(o.label,16,bx-x-40),x+25,ry,bx-x-35,26,16,C.label)
+    cv:rect(bx,ry+9,bw,8,C.fill,true);cv:rect(bx,ry+9,math.max(1,bw*o.share),8,o.you and C.gold or C.value,true)
+    cv:text(fmt(o.u),x+w-170,ry,80,26,16,C.value,"right");cv:text(pct(o.share,1),x+w-85,ry,60,26,16,C.muted,"right")
+   end end}
+ end
  if graph then table.insert(cards,1,graph)end
  if d.parts and #d.parts>0 then local n=#d.parts
   cards[#cards+1]={col=2,h=46+Data.table_h(n)+12,draw=function(x,y,w)view:_card(cv,x,y,w,46+Data.table_h(n)+12,"By Kind");Data.table(view,cv,x,y+46,w,{{"Kind"},{"Share",250},{"Damage",390},{"Overkill",w-35}},d.parts)end}
@@ -299,103 +351,36 @@ local function attacks(view,cv,popup,a,st)
  for _,b in ipairs(a.best)do cards[#cards+1]=kv_card(view,cv,b.title,b.rows)end
  Data.layout(view,cards,D.sheet);view:_sheet_end(cv)
 end
-local function builds(view,cv,popup,run,tracker,st)
- local c=run.context
- local snapshots=c.operative_loadouts or {}
- local members=run.party_records and run.party_records.members or {}
- local roster,identities=c.operative_roster or {},c.operative_identities or {}
- local ids,opts={},{}
- for id in pairs(snapshots)do
-  if not c.character or id~=c.character_name then ids[id]=true end
- end
- for id in pairs(identities)do ids[id]=true end
- for id in pairs(roster)do ids[id]=true end
- for id in pairs(members)do ids[id]=true end
- if c.character then ids[tostring(c.character)]=true end
- for id in pairs(ids)do
-  local member=members[id] or {}
-  local you=member.personal==true or tostring(id)==tostring(c.character)
-  local legacy_name=not (you or roster[id] or identities[id]) and (c.teammates or {})[id] and id
-  local label=legacy_name or People.name(c,id,tracker,member.class)
-  opts[#opts+1]={value=tostring(id),label=label..(you and " (You)" or ""),you=you}
- end
- table.sort(opts,you_first)
- local current=opts[1]
- for _,o in ipairs(opts)do if o.value==st.build then current=o end end
- if current then
-  for _,o in ipairs(opts)do o.current=current.value end
-  Data.dropdown(view,cv,popup,"io_run_build",1010,D.row2,280,"Operative:",current.label,opts,function(v)st.build=v end)
- end
- view:_sheet(cv,D.sheet)
- local cards={}
- local snapshot=current and (snapshots[current.value] or current.you and snapshots[c.character_name])
- if snapshot then
-  local function add_perks(rows,perks)
-   rows[#rows+1]={head="Perks"}
-   for label in (perks or "Unavailable"):gmatch("[^/]+")do
-    rows[#rows+1]={note=label:match("^%s*(.-)%s*$")}
-   end
+-- End Screen: the match's End Screen card as it was, scaled from its 1800 wide frame to the page; a click on a plate shows that operative's card
+local Saved
+local function endscreen(view,cv,run,tracker,st)
+ local ok,err=pcall(function()
+  Saved=Saved or mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/endscreen_saved")
+  local M=Saved.model(tracker,run)
+  local k=D.width/1800;local ox,oy=D.left-60*k,D.sheet-24*k
+  local lay,ground=Saved.layout(M,st.es,function(t,size,font)return view:_w(t,size*k,font)/k end)
+  local list={};for _,o in ipairs(ground)do list[#list+1]=o end;for _,o in ipairs(lay.ops)do list[#list+1]=o end
+  for i,o in ipairs(list)do o.n=i end;table.sort(list,function(a,b)if (a.l or 0)~=(b.l or 0)then return (a.l or 0)<(b.l or 0)end;return a.n<b.n end)
+  for _,o in ipairs(list)do
+   if o.t=="r"then cv:rect(ox+o.x*k,oy+o.y*k,o.w*k,o.h*k,o.c)
+   elseif o.t=="t"then cv:text(o.s,ox+o.x*k,oy+o.y*k,o.w*k,o.h*k,o.size*k,o.c,o.align,o.font)
+   elseif o.t=="o"then cv:circle(ox+o.x*k,oy+o.y*k,o.r*k,o.c)
+   elseif o.t=="i"then cv:texture(o.mat,ox+o.x*k,oy+o.y*k,o.w*k,o.h*k,o.c)
+   elseif o.t=="q"then local a=o.w*k;local cx,cy=ox+(o.x+o.w/2)*k,oy+(o.y+o.h/2)*k;local d=a*.3536;cv:line(cx-d,cy-d,cx+d,cy+d,a,o.c)end
   end
-  for _,slot in ipairs({{"melee","Melee"},{"ranged","Ranged"}})do
-   local id=slot[1]
-   if snapshot[id] or snapshot[id.."_perks"] or snapshot[id.."_blessings"] then
-    local rows={{head=snapshot[id] or "Item unavailable"}}
-    add_perks(rows,snapshot[id.."_perk_details"] or snapshot[id.."_perks"])
-    rows[#rows+1]={head="Blessings"}
-    rows[#rows+1]={note=snapshot[id.."_blessings"] or "Unavailable"}
-    cards[#cards+1]=kv_card(view,cv,slot[2],rows)
-   end
-  end
-  local curios,by_bonus={},{}
-  for i=1,3 do
-   local id="curio_"..i
-   local name,bonus,perks=snapshot[id],snapshot[id.."_blessings"],snapshot[id.."_perks"]
-   if name or bonus or perks then
-    local kind=bonus and bonus~="None" and bonus~="Unknown blessing" and bonus or name or "Curio bonus unavailable"
-    local group=by_bonus[kind]
-    if not group then
-     group={kind=kind,sets={},by_perks={}}
-     curios[#curios+1]=group
-     by_bonus[kind]=group
-    end
-    local labels={}
-    for label in (perks or "Unavailable"):gmatch("[^/]+")do labels[#labels+1]=label:match("^%s*(.-)%s*$") end
-    table.sort(labels)
-    local key=table.concat(labels," / ")
-    local set=group.by_perks[key]
-    if not set then
-     set={perks=key,count=0}
-     group.sets[#group.sets+1]=set
-     group.by_perks[key]=set
-    end
-    set.count=set.count+1
-   end
-  end
-  local rows={}
-  for _,group in ipairs(curios)do
-   for _,set in ipairs(group.sets)do
-    rows[#rows+1]={head=group.kind..(set.count>1 and " ×"..set.count or "")}
-    add_perks(rows,set.perks)
-   end
-  end
-  if #rows>0 then cards[#cards+1]=kv_card(view,cv,"Curios",rows)end
-  rows={}
-  for _,field in ipairs({{"aura","Aura"},{"blitz","Blitz"},{"keystone","Keystone"}})do
-   if snapshot[field[1]] then rows[#rows+1]={l=field[2],v=snapshot[field[1]]}end
-  end
-  if #rows>0 then cards[#cards+1]=kv_card(view,cv,"Talents",rows)end
- end
- if #cards==0 then
-  cards[1]=kv_card(view,cv,"Build Unavailable",{{note="No build data was saved for this operative."}})
- end
- Data.layout(view,cards,D.sheet);view:_sheet_end(cv)
+  for _,h in ipairs(lay.hot)do if h.id=="plate"then local i=h.i;view:_hit("base",ox+h.x*k,oy+h.y*k,h.w*k,h.h*k,function()st.es=i end)
+   elseif h.id=="avgswitch"then view:_hit("base",ox+h.x*k,oy+h.y*k,h.w*k,h.h*k,function()mod:set("endscreen_squad_average",mod:get("endscreen_squad_average")~=true)end)end end
+ end)
+ if not ok then view:_card(cv,D.left,D.sheet,D.width,92,"No End Screen For This Match");local said="endscreen|"..tostring(err);if view.io_said~=said then view.io_said=said;mod:error("I/O mission End Screen: %s",tostring(err))end end
 end
 return function(view,cv,popup)
  local tracker=view:_tracker();local model=view.model
  local last=view.page=="last";local id;if last then id=model and model.last and model.last.id else id=view.io_params and view.io_params.run end
  local run,index
  if tracker and id then run,index=find(tracker,id)end
- if not run then view:_card(cv,D.left,D.row2,D.width,92,"No Missions Recorded Yet");return end
+ if not run then local h=tracker and tracker.data and tracker.data.run_history or {};local id=view.io_params and view.io_params.run;local gone=id~=nil and #h>0
+  for _,r in ipairs(h)do if r.id==id then gone=false;break end end
+  view:_card(cv,D.left,D.row2,D.width,92,gone and "This Match Is No Longer In Match History" or "No Missions Recorded Yet");return end
  local okm,m,avail=pcall(function()return shape(tracker,run),available(run)end)
  if not okm then view:_card(cv,D.left,D.row2,D.width,92,"This Match File Could Not Be Read");local said=view.page.."|"..tostring(m);if view.io_said~=said then view.io_said=said;mod:error("I/O %s: %s",view.page,tostring(m))end;return end
  local st=view.io_run_sel;if not st or st.id~=run.id then st={id=run.id};view.io_run_sel=st end
@@ -437,12 +422,13 @@ return function(view,cv,popup)
   view:_ctl(cv,"base",tx,D.row2,w,34,function()if view.io_tab~=t[1]then view.io_tab=t[1];reset()end end,{sel=sel});cv:text(t[2],tx,D.row2,w,34,16,sel and C.gold_hi or C.value,"center");tx=tx+w+8 end end
  local tab=view.io_tab
  if tab=="overview"then return overview(view,cv,m,run)end
- if tab=="build"then return builds(view,cv,popup,run,tracker,st)end
+ if tab=="build"then return Build(view,cv,popup,run,tracker,st)end
+ if tab=="endscreen"then return endscreen(view,cv,run,tracker,st)end
  local okT,data
  if tab=="damage"then okT,data=pcall(damage_shape,tracker,run,st.det)
  elseif tab=="ff"then okT,data=pcall(ff_shape,tracker,index)
  elseif tab=="deaths"then okT,data=pcall(deaths_shape,tracker,index)
  else okT,data=pcall(attack_shape,tracker,run,st.atk)end
- if not okT then view:_card(cv,D.left,D.sheet,D.width,92,"No Data Recorded");mod:error("I/O mission %s: %s",tab,tostring(data));return end
+ if not okT then view:_card(cv,D.left,D.sheet,D.width,92,"No Data Recorded");local said=tab.."|"..tostring(data);if view.io_said~=said then view.io_said=said;mod:error("I/O mission %s: %s",tab,tostring(data))end;return end
  if tab=="damage"then damage(view,cv,popup,data,st,run)elseif tab=="ff"then friendly(view,cv,data)elseif tab=="deaths"then deaths(view,cv,data)else attacks(view,cv,popup,data,st)end
 end

@@ -4,10 +4,8 @@ function Records:survival_event(event)
     if event == "peril_detonated" then return self:psyker_explosion() end
     local m, definition = self.mission, survival_events[event]
     if not m or not definition then return false end
-    m.failed[event] = true
-    if m.context then local record=self:mode_streak(m.context.patch,m.context.mode);local scoped=self:class_mode_streak(m.context.patch,m.context.mode,m.context.class);for id,d in pairs(Records.mode_streak_fields or {}) do if d.event==event then record.current[id]=0;scoped.current[id]=0 end end end
+    m.failed[event] = true -- the streaks reset when the run is counted, so a data-only run leaves them
     local row = self:mission_row(m.context)
-    row[definition.current] = 0
     if event == "mutant_charged" then
         m.mutant_catches = (m.mutant_catches or 0) + 1
         row.best.mutant_charges_mission = math.max(row.best.mutant_charges_mission or 0, m.mutant_catches)
@@ -82,7 +80,7 @@ function Records:incident(event,personal,member,class)
         stats.personal[field]=(stats.personal[field] or 0)+1
         local id=field=="mutant_charges" and "mutant_charges_mission" or "personal_"..field.."_mission"
         self:incident_record(id,stats.personal[field])
-        if event=="died" then m.failed.died=true;m.failed.knocked_down=true;self:mission_row(m.context).undowned_current=0;self:mission_row(m.context).death_free_current=0;self:mode_streak(m.context.patch,m.context.mode).current.undowned=0;local scoped=self:class_mode_streak(m.context.patch,m.context.mode,m.context.class);scoped.current.undowned=0;scoped.current.death_free=0 end
+        if event=="died" then m.failed.died=true;m.failed.knocked_down=true end
     elseif member then
         local person=stats.members[member] or {class=class,counts={}};stats.members[member]=person
         person.counts[field]=(person.counts[field] or 0)+1;person.class=class or person.class;Records.mark_reached(stats.members,person,field)

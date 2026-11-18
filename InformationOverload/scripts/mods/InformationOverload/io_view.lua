@@ -39,6 +39,8 @@ function View:init(settings,context)
 end
 function View:on_enter()
  View.super.on_enter(self)
+ -- the tidy of older saves waits while the panel is open, as each of its steps lets go of the match the page reads
+ mod.io_view_open=true
  -- a scoreboard tapped on goes off once the panel opens
  local sb=mod.io_scoreboard;if sb and sb.state then sb.state.on=nil end
  self.io_key_armed=nil;self.pinned=mod:get("rail_pinned")==true;self.rail_mode=nil;self.rows=nil;self.leaving=nil;self.swap_t0=nil;self.io_bar_drag=nil;self.io_slide=nil
@@ -50,8 +52,9 @@ function View:on_enter()
  self:_refresh()
 end
 function View:on_exit()
- self.layers={};self.hits={};self.model=nil;self.rows=nil;self.leaving=nil;self.intro=nil;self.io_flash=nil;self.io_tip=nil;self.io_doss=nil;self.io_bar_drag=nil;self.io_slide=nil
+ self.layers={};self.hits={};self.model=nil;self.rows=nil;self.leaving=nil;self.intro=nil;self.io_flash=nil;self.io_tip=nil;self.io_doss=nil;self.io_bar_drag=nil;self.io_slide=nil;mod.io_view_open=nil
  if mod.io_storage and mod.io_storage.release_details then mod.io_storage:release_details()end
+ if mod.io_release_talent_art then mod.io_release_talent_art()end
  if View.super.on_exit then View.super.on_exit(self)end
 end
 function View:_tracker()
@@ -84,26 +87,35 @@ function View:_w(text,size,font)
 end
 -- text cut to a width with an ellipsis, a whole character at a time
 function View:_fit(text,size,w,font)text=tostring(text);if self:_w(text,size,font)<=w then return text end;while #text>1 and self:_w(text.."…",size,font)>w do text=text:gsub("[^\128-\191]?[\128-\191]*$","")end;return (text:gsub("[%s,|]+$","")).."…"end
-function View:_go(page)
- if page==self.page then return end
- self.stack[#self.stack+1]=self.page;if #self.stack>60 then table.remove(self.stack,1);self.io_run_back=nil end
+function View:_push()
+ self.stack[#self.stack+1]=self.page;if #self.stack>60 then table.remove(self.stack,1);local rb=self.io_run_back;if rb then for i=1,#self.stack+1 do rb[i]=rb[i+1] end end end
  -- a mission left behind is remembered with its place on the stack, so Back shows that mission again
  self.io_run_back=self.io_run_back or {};self.io_run_back[#self.stack]=self.page=="run"and self.io_params and self.io_params.run or nil
- self.page=page;self.io_fwd=nil
+end
+function View:_go(page)
+ if page==self.page then return end
+ self:_push();self.page=page;self.io_fwd=nil
 end
 -- a step back keeps what it left so the forward side button can undo it: the page and the plain values the page keeps on the view
 local SNAP_SKIP={io_crumbs_page=true,io_crumbs_drawn=true,io_tap=true,io_nope=true,io_unlock=true,io_move=true,io_drag=true,io_dirty=true,io_bench_at=true,io_hkey=true,io_key_armed=true,io_set_part=true}
 local function snappable(k,v)return type(k)=="string"and k:sub(1,3)=="io_"and not SNAP_SKIP[k]and (type(v)=="string"or type(v)=="number"or type(v)=="boolean")end
 -- on a mission, which mission it is is kept too, as a step back to a mission must show that mission
-function View:_snap()local v={};for k,x in pairs(self)do if snappable(k,x)then v[k]=x end end;if self.page=="run"then v["@run"]=self.io_params and self.io_params.run end;return {page=self.page,v=v}end
+function View:_snap()local v={};for k,x in pairs(self)do if snappable(k,x)then v[k]=x end end;if self.page=="run"then v["@run"]=self.io_params and self.io_params.run end;if self.page=="settings"then v["@from"]=self.settings_from end;return {page=self.page,v=v}end
 local function put_run(self,s)if s.v["@run"]~=nil then self.io_params=self.io_params or {};self.io_params.run=s.v["@run"]end end
+-- settings sits over the page it was opened from and never goes on the stack, so a step into or out of it moves the stack only between those pages
+local function move(self,s,pop)
+ local cur=self.page;if cur=="settings"then cur=self.settings_from or "overview";self.settings_from=nil end
+ local to=s.page=="settings"and (s.v["@from"]or cur)or s.page
+ if to~=cur then self.page=cur;local i=#self.stack;if pop and self.stack[i]==to then self.stack[i]=nil;if self.io_run_back then self.io_run_back[i]=nil end else self:_push()end end
+ self.page=to;if s.page=="settings"then self.settings_from=to;self.page="settings"end
+end
 local function same(a,b)if a.page~=b.page then return false end;for k,x in pairs(a.v)do if b.v[k]~=x then return false end end;for k in pairs(b.v)do if a.v[k]==nil then return false end end;return true end
 -- every click that takes the panel somewhere new, a view inside a page included, leaves where it was for right click to step back to
 function View:_came_from(s)if same(s,self:_snap())then return end;self.io_steps=self.io_steps or {};self.io_steps[#self.io_steps+1]=s;if #self.io_steps>30 then table.remove(self.io_steps,1)end end
 function View:_restore(s)
- if s.page~=self.page then local i=#self.stack;if self.stack[i]==s.page then self.stack[i]=nil else self.stack[i+1]=self.page end end;self.page=s.page
+ move(self,s,true)
  for k,x in pairs(self)do if snappable(k,x)and s.v[k]==nil then self[k]=nil end end
- for k,x in pairs(s.v)do if k~="@run"then self[k]=x end end;put_run(self,s)
+ for k,x in pairs(s.v)do if k:sub(1,1)~="@"then self[k]=x end end;put_run(self,s)
 end
 function View:_step_back()
  -- a step that would land where the panel already is gets skipped
@@ -115,9 +127,9 @@ function View:_remember(s)self.io_fwd=self.io_fwd or {};self.io_fwd[#self.io_fwd
 function View:_forward()
  local s=self.io_fwd and table.remove(self.io_fwd);if not s then return end
  local cur=self:_snap();self.io_steps=self.io_steps or {};self.io_steps[#self.io_steps+1]=cur
- if s.page~=self.page then self.stack[#self.stack+1]=self.page end;self.page=s.page
+ move(self,s)
  for k,x in pairs(self)do if snappable(k,x)and s.v[k]==nil then self[k]=nil end end
- for k,x in pairs(s.v)do if k~="@run"then self[k]=x end end;put_run(self,s)
+ for k,x in pairs(s.v)do if k:sub(1,1)~="@"then self[k]=x end end;put_run(self,s)
 end
 -- a page that opens something inside itself names its way up in its crumbs, and the Back button takes that step before leaving the page; right click always goes back to the page before
 -- the crumbs kept from the last render count only while that page is still the one showing
@@ -236,7 +248,7 @@ function View:_tip_at(hit,x,y)
  local tip,lines=self.io_tip,hit and not self.dd and x and hit.tip
  if type(lines)~="table"or #lines==0 then if tip then tip.on=false end;return end
  if not tip or tip.lines~=lines then local key=tip_key(lines)
-  if not tip or tip.key~=key then local ok,made=pcall(self._tip_build,self,lines)
+  if not tip or tip.key~=key then local ok,made=pcall(lines.build or self._tip_build,self,lines)
    if not ok then mod:error("I/O tip: %s",tostring(made));made={broken=true}end;made.key=key;tip=made;self.io_tip=tip
   end
   tip.lines=lines
@@ -260,10 +272,11 @@ function View:_sheet_end(cv)
   self:_hit("base",1290,sc.y0,16,view_h,function()self.io_bar_drag={page=self.page};return true end,nil,nil,nil,"io_bar")
  end
 end
+-- the safe lookup: before the game has connected, the plain one asks the network for an id it has not got and the game crashes
+local function class_art()local pm=Managers.player;local pl=pm and pm.local_player_safe and pm:local_player_safe(1);local pr=pl and pl:profile();local path=pr and pr.archetype and pr.archetype.archetype_icon_large
+ if path and Application.can_get_resource("material",path)then return path end end
 function View:_icon(cv,key,x,y,c)
- -- the safe lookup: before the game has connected, the plain one asks the network for an id it has not got and the game crashes
- if key=="classes"then local pm=Managers.player;local pl=pm and pm.local_player_safe and pm:local_player_safe(1);local pr=pl and pl:profile();local path=pr and pr.archetype and pr.archetype.archetype_icon_large
-  if path and Application.can_get_resource("material",path)then return cv:texture(path,x-2,y-2,24,24,c,true)end end
+ if key=="classes"then local path=class_art();if path then return cv:texture(path,x-2,y-2,24,24,c,true)end end
  -- I/O's logo, on Settings, fills its square 15% more than the other icons, about the same middle
  if key=="settings"then return cv:icon(Icons.settings,x-1.5,y-1.5,c,nil,23)end
  if Icons[key]then return cv:icon(Icons[key],x,y,c)end
@@ -288,6 +301,13 @@ local function clip(wd)
  wd.io_passes=list;wd.io_dy=nil;place_row(wd,0);return wd
 end
 local function clipped(a,b)return clip(a),clip(b)end
+local function kept(wd)if wd then place_row(wd,0)end;return wd end
+-- every texture pass takes a material of its own, so the layers and bar rows a draw replaces are let go with them rather than left to pile up until the panel closes
+local DROP={"under","over","ru","ro","du","dov"}
+function View:_drop(layers,keep)
+ local r=self._ui_renderer;if not r then return end;local UIWidget=require("scripts/managers/ui/ui_widget")
+ for _,l in ipairs(layers or {})do for _,k in ipairs(DROP)do if l[k]and not (keep and keep[l[k]])then pcall(UIWidget.destroy,r,l[k])end end end
+end
 function View:_render()
  if self.io_move then return self:_render_move()end
  self.hits={};self.sheet=nil;self.scroll_max=0;self.sheet_span=nil;self.io_bar=nil;local base,rail,drawer,popup=D.canvas(),D.canvas(),D.canvas(),D.canvas();if self.drawer_k and self.drawer_k<1 then drawer.cx=16-292*self.drawer_k end
@@ -295,7 +315,11 @@ function View:_render()
  -- until the cog reaches Screens the intro has the panel to itself
  local intro=self.intro;local shell=intro and intro:shell()
  -- Swapping between the page bar and the settings bar keeps the old bar's rows to scroll away.
- if self.rail_mode~=nil and self.rail_mode~=settings then self.leaving=self.rows;self.swap_t0=self.now;self.swap_dir=settings and 1 or -1 end
+ local was=self.rows
+ -- a row drawn as it was last time keeps last time's widgets, unless the bar swapped or the screen's size or scale changed
+ local res=RESOLUTION_LOOKUP or {};local at=tostring(res.width).."x"..tostring(res.height).."@"..tostring(res.scale).."/"..tostring(self._render_scale)
+ local reuse=self.rail_mode==settings and self.rows_at==at and was or nil;self.rows_at=at
+ if self.rail_mode~=nil and self.rail_mode~=settings then self:_drop(self.leaving);self.leaving=self.rows;self.swap_t0=self.now;self.swap_dir=settings and 1 or -1 end
  self.rail_mode=settings
  base.z=0;base:rect(-1300,-1110,3920,3080,C.dim)
  -- while I/O talks there is no bar; it appears as the cog flies down to sit in it
@@ -305,14 +329,25 @@ function View:_render()
  -- each row is its own widget so a swap can scroll the rows inside the bar
  local rows={}
  for i,e in ipairs(entries)do span[1]=math.min(span[1],e.top);span[2]=math.max(span[2],e.top+40)
-  local rc,dc=D.canvas(),D.canvas();dc.cx=drawer.cx
-  if e.sep then rc:rect(26,e.top,36,1,SEP)
-  else
-   local hv=e.locked and {}or nil
-   self:_ctl(rc,"rail",22,e.top,44,40,e.fn,{sel=e.sel,rail=i,hv=hv})
-   if not e.away then self:_icon(rc,e.icon or e.key,34,e.top+10,e.locked and LOCKED or (e.sel or e.lit)and C.gold_hi or C.label)end
-   if e.locked then rc:icon(Icons.lock,51,e.top+25,C.muted,nil,14)end
-   if not e.icon_only then
+  local ik=e.icon or e.key;local hv=e.locked and {}or nil
+  local rk=e.sep and "sep|"..e.top or table.concat({e.key,ik,tostring(e.sel),tostring(e.lit),tostring(e.locked),tostring(e.away),tostring(e.icon_only),tostring(e.label),tostring(e.sub),tostring(e.count),e.top,
+   tostring(ik=="classes"and class_art()),tostring(not Icons[ik]and mod.io_icons_ready and mod.io_icons_ready())},"|")
+  local dk=rk.."|"..tostring(drawer.cx);local p=reuse and reuse[i];local row={y=e.top,h=40,key=e.key,rk=rk,dk=dk}
+  local rc,dc
+  if p and p.rk==rk then row.ru,row.ro=kept(p.ru),kept(p.ro)
+   if not e.sep and e.fn then self:_hit("rail",22,e.top,44,40,e.fn,hv or (not e.sel and {bg=C.fill_h,edge=C.hover})or nil,i)end
+  else rc=D.canvas()
+   if e.sep then rc:rect(26,e.top,36,1,SEP)
+   else
+    self:_ctl(rc,"rail",22,e.top,44,40,e.fn,{sel=e.sel,rail=i,hv=hv})
+    if not e.away then self:_icon(rc,ik,34,e.top+10,e.locked and LOCKED or (e.sel or e.lit)and C.gold_hi or C.label)end
+    if e.locked then rc:icon(Icons.lock,51,e.top+25,C.muted,nil,14)end
+   end
+  end
+  if p and p.dk==dk then row.du,row.dov=kept(p.du),kept(p.dov)
+   if not e.sep and not e.icon_only and e.fn then self:_hit("drawer",-208,e.top,216,40,e.fn,hv or (not e.sel and {bg=C.fill_h,edge=C.hover})or nil,i)end
+  else dc=D.canvas();dc.cx=drawer.cx
+   if not e.sep and not e.icon_only then
     self:_ctl(dc,"drawer",-208,e.top,216,40,e.fn,{sel=e.sel,rail=i,hv=hv})
     if e.sub then dc:text(e.label,-194,e.top+3,188,20,16,C.value);dc:text(e.sub,-194,e.top+21,188,16,13,C.muted,"left",F.medium)
     -- a screen turned off has its name greyed, as its icon is
@@ -320,7 +355,7 @@ function View:_render()
     if e.count then dc:text(e.count,-120,e.top,106,40,14,e.sel and C.gold_hi or C.muted,"right")end
    end
   end
-  rows[#rows+1]={y=e.top,h=40,rc=rc,dc=dc,key=e.key}
+  row.rc,row.dc=rc,dc;rows[#rows+1]=row
  end
  if settings then
   local function piece(y,h,draw)local dc=D.canvas();dc.cx=drawer.cx;draw(dc);rows[#rows+1]={y=y,h=h,dc=dc}end
@@ -375,16 +410,18 @@ function View:_render()
   self:_crumbs(base)
  end
  D.picks=nil
- self.layers={}
+ local old=self.layers;self.layers={}
  for i,r in ipairs(rows)do
   if r.rc then r.ru,r.ro=clipped(r.rc:widgets("io_rail"..i,12))end
-  r.du,r.dov=clipped(r.dc:widgets("io_name"..i,40));r.rc,r.dc=nil,nil
+  if r.dc then r.du,r.dov=clipped(r.dc:widgets("io_name"..i,40))end;r.rc,r.dc=nil,nil
  end
- self.rows=rows
+ local keep;if reuse then keep={};for _,r in ipairs(rows)do for _,k in ipairs(DROP)do if r[k]then keep[r[k]]=true end end end end
+ self.rows=rows;if was~=self.leaving then self:_drop(was,keep)end
  local cvs={base=base,rail=rail,drawer=drawer,popup=popup}
  for _,g in ipairs(GROUPS)do local cv=cvs[g[1]]
   local under,over=cv:widgets("io_"..g[1],g[2]);self.layers[#self.layers+1]={g=g[1],z=g[2],under=under,over=over}
  end
+ self:_drop(old)
 end
 -- Move: the panel steps aside so one box, io_move, can be dragged: the squad or the Tracker Panel where they show with the key held, or "tm_esc", the Tracker Panel beside the Esc menu.
 function View:_screen()
@@ -393,6 +430,7 @@ function View:_screen()
  return sw,sh,o and o[1]or (sw-D.panel_size[1])/2,o and o[2]or (sh-D.panel_size[2])/2
 end
 function View:_render_move()
+ self:_drop(self.rows);self:_drop(self.leaving)
  self.hits={};self.sheet=nil;self.sheet_span=nil;self.io_bar=nil;self.rail_span=nil;self.rows={};self.leaving=nil
  local sw,sh,ox,oy=self:_screen();self.io_screen={sw,sh,ox,oy}
  local o=S.options(get);local layout=o.layout=="off"and "cards"or o.layout;local label="Squad Cards"
@@ -412,19 +450,16 @@ function View:_render_move()
   local below=kind=="squad"and sb and sb.tab_below and sb.tab_below(sw,sh,function(_,s,size,font)return self:_w(s,size,font)end)
   local list=S.move_boxes(kind,o,tab_key,layout,n,sw,sh,at,below);local b=list[1]
   self.io_boxes[kind]=b;self.io_ghosts={}
-  -- a Tracker Panel's bottom 50 holds the best-clear line, there only with a best clear here
-  local function strip(x,y,w,h)cv:rect(x,y+h-50,w,1,C.line);cv:text("Shows With A Best Clear",x,y+h-50,w,50,14,C.muted,"center",F.medium)end
   local x,y,w,h=b.x-ox,b.y-oy,b.w,b.h;local c=on and C.gold or C.frame
   cv.z=1;cv:rect(x,y,w,h,C.panel);cv.z=2;cv:edges(x,y,w,h,2,c);cv:corners(x-1,y-1,w+2,h+2,on and C.gold or C.corner)
-  local mid=y+(b.strip and h-50 or h)/2
+  local mid=y+h/2
   cv:text(kind=="squad"and label or "Tracker Panel",x,mid-36,w,40,28,C.gold,"center",F.title);cv:text("Drag to move it.",x,mid+6,w,26,16,C.label,"center",F.medium)
-  if b.strip then strip(x,y,w,h)end
-  -- where it shows instead, outlined: its best-clear strip and name drawn only where the box leaves them clear, a name with no room said under the instructions
+  -- where it shows instead, outlined: its name drawn only where the box leaves it clear, a name with no room said under the instructions
   local function clear(gy,gh,g)return gh>0 and not (g.x<b.x+b.w and b.x<g.x+g.w and gy<b.y+b.h and b.y<gy+gh)end
   cv.z=3
   for i=2,#list do local g=list[i];self.io_ghosts[#self.io_ghosts+1]=g;local gx,gy=g.x-ox,g.y-oy
    cv:edges(gx,gy,g.w,g.h,1,C.hover)
-   local foot=g.y+g.h;if g.strip and clear(foot-50,50,g)then strip(gx,gy,g.w,g.h);foot=foot-50 end
+   local foot=g.y+g.h
    local at_y=clear(foot-26,26,g)and foot-26 or clear(g.y+4,26,g)and g.y+4
    if at_y then g.named=true;cv:text(g.label,gx,at_y-oy,g.w,22,14,C.label,"center",F.medium)end
   end
@@ -437,7 +472,7 @@ function View:_render_move()
  local function button(x,w,text,fn)self:_ctl(cv,"base",x,by,w,36,fn);cv:text(text,x,by,w,36,16,C.value,"center")end
  button(cx-170,160,"Done",function()self.io_move=nil;self.io_drag=nil end)
  button(cx+10,160,"Reset",function()local k=S.KEYS[kind];mod:set(k[1],nil);mod:set(k[2],nil,true)end)
- local under,over=cv:widgets("io_base",10);self.layers={{g="base",z=10,under=under,over=over}}
+ local under,over=cv:widgets("io_base",10);self:_drop(self.layers);self.layers={{g="base",z=10,under=under,over=over}}
 end
 function View:_move_input(input,x,y)
  local d,sc=self.io_drag,self.io_screen
@@ -485,7 +520,7 @@ end
 function View:_rows(cv,x,y,w,rows,jump)
  for i,r in ipairs(rows)do local ry=y+(i-1)*26
   if r[3]and jump then self:_jump(cv,x+8,ry+2,jump)end
-  cv:text(r[1],x+36,ry,w-200,26,16,C.label);cv:text(r[2],x+w-313,ry,300,26,16,C.value,"right")
+  if not r.more then cv:text(r[1],x+36,ry,w-200,26,16,C.label)end;cv:text(r[2],x+w-313,ry,300,26,16,C.value,"right")
  end
 end
 -- with no pick it is drawn dimmed and does nothing
@@ -512,20 +547,22 @@ end
 -- allow_all gives the page an All Patches entry, kept apart from the patch the other pages use; a page whose figures count every difficulty shows Difficulty dimmed at N/A
 function View:_scope(base,popup,m,allow_all,no_diff)
  local s=self.scope;local runs=function(n)n=n or 0;return n..(n==1 and " Run"or " Runs")end
+ -- what is picked is kept, so the pages open on it next time
+ local function keep()if mod.set then mod:set("io_last_scope",{mode=s.mode,diff=s.diff,patch=s.patch,all_patches=s.all_patches})end end
  -- the runs counted are the Patch picked's, every patch's only on All Patches
  local every=allow_all and s.all_patches;local counts,total=m.mode_counts,m.mode_total;if not every then counts,total=m.patch_counts or {},m.patch_total end
  local modes={}
  for _,mode in ipairs({"havoc","non-havoc"})do modes[#modes+1]={value=mode,current=s.mode,label=Overview.mode_names[mode],n=runs(counts[mode])}end
- self:_dropdown(base,popup,"mode",100,200,"Mode:",Overview.mode_names[s.mode]or DASH,modes,function(v)s.mode=v;s.diff="all"end)
+ self:_dropdown(base,popup,"mode",100,200,"Mode:",Overview.mode_names[s.mode]or DASH,modes,function(v)s.mode=v;s.diff="all";keep()end)
  if no_diff then self:_dropdown(base,popup,"diff",310,290,"Difficulty:","N/A")else
   local all=s.mode=="havoc"and "All Havoc"or "All";local diffs={{value="all",current=s.diff,label=all,n=runs(total)}};local shown=all
   for _,d in ipairs(m.diffs)do diffs[#diffs+1]={value=d.value,current=s.diff,label=d.label,n=runs(every and d.count or d.patch_count),ind=true};if d.value==s.diff then shown=d.label end end
-  self:_dropdown(base,popup,"diff",310,290,"Difficulty:",shown,diffs,function(v)s.diff=v end)
+  self:_dropdown(base,popup,"diff",310,290,"Difficulty:",shown,diffs,function(v)s.diff=v;keep()end)
  end
  local cur=every and "all"or s.patch;local patches={}
  if allow_all then patches[1]={value="all",current=cur,label="All Patches"}end
  for i=#m.patches,1,-1 do local p=m.patches[i];patches[#patches+1]={value=p,current=cur,label=Patch.display(p)..(p==m.current_patch and " (Current)"or "")}end
- self:_dropdown(base,popup,"patch",610,170,"Patch:",every and "All"or s.patch and Patch.display(s.patch)or DASH,patches,function(v)if v=="all"then s.all_patches=true else s.patch=v;if allow_all then s.all_patches=false end end end)
+ self:_dropdown(base,popup,"patch",610,170,"Patch:",every and "All"or s.patch and Patch.display(s.patch)or DASH,patches,function(v)if v=="all"then s.all_patches=true else s.patch=v;if allow_all then s.all_patches=false end end;keep()end)
 end
 function View:_overview(cv,popup)
  local m=self.model
@@ -548,7 +585,7 @@ function View:_overview(cv,popup)
  local mode=Overview.mode_names[self.scope.mode]
  local open_history=function()self.io_hist_tab=nil;self:_go("history")end
  -- a best opens its mission, as the Records page opens one
- local open_run=function(id)self.io_params=self.io_params or {};self.io_params.run=id;self.io_tab="overview";self:_go("run")end
+ local open_run=function(id)self.io_params=self.io_params or {};self.io_params.run=id;self.io_tab="overview";if self.scroll then self.scroll.run=0 end;self:_go("run")end
  local function row_of(rows,label)for _,r in ipairs(rows)do if r[1]==label then return r end end;return {}end
  -- the headline tiles: six of one size along the top, the ones with somewhere to go opening it
  local games,rate=row_of(m.career.rows,"Games"),row_of(m.career.rows,"Win Rate")
@@ -693,6 +730,8 @@ function View:update(dt,t,input)
  local intro=self.intro
  if intro then local ok,dirty=pcall(intro.tick,intro,self,t);if not ok then self:_intro_broken(dirty)elseif dirty then self:_render()end end
  if self.io_dirty then self.io_dirty=nil;self:_render()end
+ -- a page that changes on its own, such as the Build tab's turning curios, names when it next needs drawing
+ if self.redraw_at and t>=self.redraw_at then self.redraw_at=nil;self:_render()end
  -- the bench's live readouts move while the player hits, so in the Psykhanium its page redraws twice a second
  if self.page=="psyk"and t>=(self.io_bench_at or 0)and mod.io_is_training and mod.io_is_training()then self.io_bench_at=t+.5;self:_render()end
  if t>=(self.poll_at or 0)then self.poll_at=t+1;local rev=self:_revision();if self.rev and rev~=self.rev then self:_refresh()end;self.rev=rev end
@@ -753,7 +792,8 @@ function View:_draw_widgets(dt,t,input_service,ui_renderer,render_settings)
  local fade=self.drawer_t0 and math.max(0,math.min(1,(t-self.drawer_t0-.06)/.14))or 1
  -- on a swap the old rows scroll out of the bar while the new ones scroll in behind them, up into Settings and down out of it
  local s=self.swap_t0 and t-self.swap_t0;local k=1
- if s then k=math.min(1,s/.3);if k>=1 then self.swap_t0=nil;self.leaving=nil end else self.leaving=nil end
+ if s then k=math.min(1,s/.3);if k>=1 then self.swap_t0=nil end end
+ if not self.swap_t0 and self.leaving then self:_drop(self.leaving);self.leaving=nil end
  local e=k<.5 and 4*k^3 or 1-(2-2*k)^3/2;local dir=self.swap_dir or 1
  local function put(wd,dy,a,dx)if wd then place_row(wd,dy);wd.alpha_multiplier=a;wd.offset[1]=dx or 0;UIWidget.draw(wd,ui_renderer)end end
  -- a locked tab shakes its head when clicked

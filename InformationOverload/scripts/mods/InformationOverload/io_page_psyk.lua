@@ -28,6 +28,8 @@ local function frame(cv,x,y,w,h,labels,drawn)
  if not drawn then cv:text(DASH,x,y,w,h,22,C.muted,"center")end
 end
 local function tip(view,x,y,w,h,lines)if view._tip then view:_tip("base",x,y,w,h,lines)end end
+-- the page redraws every half second in training, so each failure is logged once a view
+local function said(view,f,err)local k=f.."|"..tostring(err);view.io_psyk_said=view.io_psyk_said or {};if not view.io_psyk_said[k]then view.io_psyk_said[k]=true;mod:error(f,tostring(err))end end
 local function live_tl()local ss=mod.io_psykhanium and mod.io_psykhanium();local m=ss and ss.mission;return m and m.combat_timeline end
 local function nice(v)local p=10^math.floor(math.log10(math.max(1,v)));local m=v/p;return (m<=1 and 1 or m<=2 and 2 or m<=2.5 and 2.5 or m<=5 and 5 or 10)*p end
 local function tick(v)if v>=1000 then return (string.format("%.2f",v/1000):gsub("0+$",""):gsub("%.$","")).."K"end;return tostring(math.floor(v+.5))end
@@ -78,7 +80,7 @@ local function dps_card(view,cv,popup_cv,s,y,data)
   if c[3]then local room=cx[i+1]and cx[i+1]-cx[i]-28 or 180;local size=shrink(view,c[3],14,room);cv:text(fit(view,c[3],size,room,F.medium),cx[i],y+96,room+6,18,size,c[4]and C.gold or C.muted,"left",F.medium)end end
  tip(view,cx[3]-8,y+46,cx[4]-cx[3]-14,70,B10_TIP)
  local fx,fy,fw,fh=x+82,y+126,w-105,190;local ok,drawn=true,false
- if d then ok,drawn=pcall(live_graph,cv,tl,d.best,fx,fy,fw,fh);if not ok then mod:error("I/O bench graph: %s",tostring(drawn));drawn=false end end
+ if d then ok,drawn=pcall(live_graph,cv,tl,d.best,fx,fy,fw,fh);if not ok then said(view,"I/O bench graph: %s",drawn);drawn=false end end
  frame(cv,fx,fy,fw,fh,{"-60 s","-45 s","-30 s","-15 s","Now"},drawn)
 end
 local function session_card(view,cv,s,data,y)
@@ -203,7 +205,7 @@ local function saved_card(view,cv,data,y)
   local sub={};if s.live then sub[1]="This Session"end;sub[#sub+1]=s.op;local b=strip(s.blessings);if b then sub[#sub+1]=(b:match("^[^,]+"))end;sub[#sub+1]=P.mss(s.dur)
   cv:text(fit(view,table.concat(sub,", "),13,176,F.medium),x+41,yy+23,180,18,13,C.muted,"left",F.medium)
   local d=fig[s];local sp=d and d.spark
-  local ok,err=true,nil;if sp then ok,err=pcall(spark,cv,sp,x+227,yy,ti and AB[ti]or C.label);if not ok then mod:error("I/O session shape: %s",tostring(err))end end;if not (sp and ok)then cv:text(DASH,x+227,yy,56,44,16,C.muted,"left")end
+  local ok,err=true,nil;if sp then ok,err=pcall(spark,cv,sp,x+227,yy,ti and AB[ti]or C.label);if not ok then said(view,"I/O session shape: %s",err)end end;if not (sp and ok)then cv:text(DASH,x+227,yy,56,44,16,C.muted,"left")end
   local b=d and d.best.dps;local gold=b and b>0 and many[s.weapon]>1 and b>=top[s.weapon]
   cv:text(s.dps and s.dps.wh and P.commas(s.dps.wh)or DASH,x+w-183,yy,80,44,16,C.value,"right");cv:text(b and P.commas(b)or DASH,x+w-93,yy,80,44,16,not b and C.muted or gold and C.gold or C.value,"right")
   cv:rect(x+12,yy+43,w-24,1,C.line,true);yy=yy+44

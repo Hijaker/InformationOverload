@@ -69,12 +69,13 @@ function B.spark(runs,n)
  return out
 end
 local function digest(tl)local runs,dur=B.series(tl);return {best=Timeline.best_window(tl,10),runs=runs,dur=dur,spark=B.spark(runs,28)}end
--- the session under way, worked out again only when a hit lands
+-- the session under way, worked out again when a hit lands and each second of the 6 second fall-off after the last one
 function B.live_digest(tl)
  local s=last(tl);if not s then return nil end
- local c=mod.io_bench_live[tl]
- if not c or c.segs~=#tl.segments or c.n~=#hits(s)then local ok,made=pcall(digest,tl)
-  if not ok then mod:error("I/O bench: %s",tostring(made));made={broken=true}end;c=made;c.segs=#tl.segments;c.n=#hits(s);mod.io_bench_live[tl]=c end
+ local c=mod.io_bench_live[tl];local ev=hits(s);local n=#ev
+ local tail=n==0 and 0 or s.last_ms>=ev[n][1]+6000 and -1 or math.floor((s.last_ms-ev[1][1])/1000)
+ if not c or c.segs~=#tl.segments or c.n~=n or c.tail~=tail then local ok,made=pcall(digest,tl)
+  if not ok then mod:error("I/O bench: %s",tostring(made));made={broken=true}end;c=made;c.segs=#tl.segments;c.n=n;c.tail=tail;mod.io_bench_live[tl]=c end
  return not c.broken and c or nil
 end
 -- a saved session decodes its file once; one that cannot be read keeps the dash

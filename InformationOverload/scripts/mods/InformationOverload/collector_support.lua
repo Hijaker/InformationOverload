@@ -65,13 +65,40 @@ return function(mod, api, d)
     end)
 
     -- Blocks: every blocked attack on a player, whoever made it; a kill of an enemy that had a teammate pinned is a save for the killer
-    local pinned = setmetatable({}, {__mode = "k"})
+    local pinned, saved = setmetatable({}, {__mode = "k"}), setmetatable({}, {__mode = "k"})
+    -- the server leaves the enemy out of a kill report it sends after setting that enemy dead, so a pinning enemy set dead waits a
+    -- moment for its own report, and with none it goes to the one player whose kills named no enemy around then
+    local fallen, blind, WAIT, fallen_m = {}, {}, 1, nil
+    local function save(enemy, attacker) pinned[enemy] = nil;saved[enemy] = true;bump(attacker, "saves") end
     function S.report(target, attacker, result)
         if result == "blocked" then bump(target, "blocked")
         elseif result == "died" and target then
             local p = pinned[target]
-            if p and attacker and attacker ~= p.victim then pinned[target] = nil;bump(attacker, "saves") end
+            -- its own report settles it even when it is no save, so no kill naming no enemy is taken for it
+            if p and attacker and attacker ~= p.victim then save(target, attacker) elseif p then pinned[target] = nil;saved[target] = true end
+        elseif result == "died" and attacker and live() then blind[#blind + 1] = {attacker = attacker, at = last_clock}
         end
+    end
+    -- called from collector_bosses.lua's hook on set_dead, which every client gets for each enemy that dies
+    function S.dead(unit) local p = pinned[unit];if p then fallen[#fallen + 1] = {unit = unit, victim = p.victim, at = last_clock} end end
+    local function settle(clock, m)
+        if m ~= fallen_m then fallen_m, fallen, blind = m, {}, {};return end
+        local n = 0
+        for i = 1, #fallen do
+            local f = fallen[i];fallen[i] = nil
+            if saved[f.unit] then
+            elseif clock - f.at <= WAIT then n = n + 1;fallen[n] = f
+            else
+                local who
+                for _, b in ipairs(blind) do if not b.used and math.abs(b.at - f.at) <= WAIT then if who == nil then who = b.attacker elseif who ~= b.attacker then who = false end end end
+                if who and who ~= f.victim then
+                    for _, b in ipairs(blind) do if not b.used and b.attacker == who and math.abs(b.at - f.at) <= WAIT then b.used = true;break end end
+                    save(f.unit, who)
+                end
+            end
+        end
+        n = 0
+        for i = 1, #blind do local b = blind[i];blind[i] = nil;if clock - b.at <= 2 * WAIT then n = n + 1;blind[n] = b end end
     end
 
     -- Each frame: who is pinned and by what, and teammates' blitzes and abilities from their charge; once a gameplay second, coherency
@@ -133,6 +160,7 @@ return function(mod, api, d)
                 end
             end
         end
+        if fallen[1] or blind[1] or m ~= fallen_m then settle(clock, m) end
         -- an enemy stays counted as pinning for a moment after the pin ends, as its death report can arrive just after
         for enemy, p in pairs(pinned) do if clock - p.at > 1.5 then pinned[enemy] = nil end end
     end

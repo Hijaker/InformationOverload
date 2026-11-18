@@ -9,19 +9,19 @@ local Storage=mod:io_dofile("InformationOverload/scripts/mods/InformationOverloa
 local Records = mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/records")
 Storage.run_damage_info=Records.run_damage_info
 Storage.run_useful=Records.run_useful
+Storage.line_parts=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/warm_parts").all
 local storage=Storage.bind(mod,Patch)
 local PartyRecords=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/party_records")
 local MissionSegments=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/mission_segments")
 MissionSegments.party_merge=PartyRecords.merge
-MissionSegments.timeline_merge=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/combat_timeline").merge
+MissionSegments.timeline_merge=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/combat_timeline").merge;MissionSegments.minutes_merge=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/team_damage").merge_minutes
 MissionSegments.measurements_merge=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/mission_measurements").merge
-MissionSegments.experimental_merge=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/legacy_research").merge
 local HistoryRecalculation=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/history_recalculation")
 Records.capture_contributions=HistoryRecalculation.capture;Records.capture_discarded=HistoryRecalculation.discarded;Records.patch_carry=Patch.carry
 Records.departure_finalize=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/departure_tracking").finalize
 -- what a saved match keeps, as it saves and when two saved parts of one mission are joined
-local Saved=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/saved_match")(mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/combat_timeline"),PartyRecords,HistoryRecalculation)
-Records.trim_saved=Saved.trim;MissionSegments.entries=HistoryRecalculation.entries;MissionSegments.trim=Saved.trim
+local Saved=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/saved_match")(mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/combat_timeline"),PartyRecords,HistoryRecalculation,mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/team_damage"),mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/barrel_tracking"))
+MissionSegments.entries=HistoryRecalculation.entries;MissionSegments.trim=Saved.trim;MissionSegments.barrel_events=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/barrel_tracking").events
 local Missions = require("scripts/settings/mission/mission_templates")
 local SpecialRules = require("scripts/settings/ability/special_rules_settings").special_rules
 local function localized(key)
@@ -61,6 +61,8 @@ if not previous then
 end
 local game_patch, update_patch=Patch.bind(mod,previous)
 local tracker = Records.new(saved)
+-- a match the main history saves may yet be joined by the next part of its mission; SoloPlay's and the Psykhanium's are never joined
+Records.trim_saved=function(run,t)return Saved.trim(run,t==tracker and Saved.joinable(run))end
 local history_policy=mod.io_data_get("history_policy_v1")or {late_join=true,rejoined=true,early_leave=true}
 local saved_baseline=mod.io_data_get("history_baseline_v1")
 local history_baseline=saved_baseline or HistoryRecalculation.baseline(tracker.data)
@@ -105,7 +107,7 @@ local TeamDamage=mod:io_dofile("InformationOverload/scripts/mods/InformationOver
 local overview_cache=mod.io_data_get("history_overview_cache_v1")
 local prepare_job
 mod.io_overview_cache=function()return overview_cache and overview_cache.version==Averages.CACHE_VERSION and overview_cache.rows or prepare_job and prepare_job.out.rows or nil end
-local revisions=Revision.new(mod.io_data_get("cache_revision_v1"),"0.5.31",tostring(APPLICATION_SETTINGS and APPLICATION_SETTINGS.game_version or game_patch()))
+local revisions=Revision.new(mod.io_data_get("cache_revision_v1"),"0.5.32",tostring(APPLICATION_SETTINGS and APPLICATION_SETTINGS.game_version or game_patch()))
 local function hub_ready()
  local manager=Managers.state and Managers.state.mission
  local name=manager and manager:mission_name()
@@ -124,9 +126,10 @@ local PsykSummary=mod:io_dofile("InformationOverload/scripts/mods/InformationOve
 local psyk=PsykSummary.keeper(storage)
 mod.io_psyk_summary=function(data)return psyk.get(data or tracker.data)end
 local solo_tracker=Records.new(mod.io_data_get("solo_records_v1"))
+local solo_recount=HistoryRecalculation.recount_needed(solo_tracker.data)
 local solo_recovered=mod.io_data_get("solo_unfinished_v1")
 if type(solo_recovered)=="table" and solo_recovered.context and solo_recovered.context.solo then
-    solo_recovered.data_only=true;solo_recovered.interrupted=true;solo_recovered.full=false
+    solo_recovered.data_only=true;solo_recovered.interrupted=true
     solo_tracker.mission=solo_recovered;solo_tracker:finish_mission(true,false,true)
     mod.io_data_set("solo_records_v1",solo_tracker.data,false);mod.io_data_set("solo_unfinished_v1",nil,false)
 end
@@ -142,6 +145,12 @@ for i=#old_history,1,-1 do
         table.insert(psykhanium_logs.data.run_history,1,run);table.remove(old_history,i)
         tracker.dirty=true;psykhanium_logs.dirty=true
     end
+end
+-- records an older build counted again, without the entries under their newer names, are counted again
+if HistoryRecalculation.recount_needed(tracker.data)then tracker.data.history_cache_rebuild_required=true;tracker.dirty=true end
+if solo_recount then
+    local source={};for k,v in pairs(solo_tracker.data)do source[k]=v end;source.history_policy_revision=(source.history_policy_revision or 0)+1
+    solo_tracker.data=HistoryRecalculation.rebuild(Records,HistoryRecalculation.legacy(Records,nil),source,history_policy,true);solo_tracker.blo_weapon_trackers={};solo_tracker.dirty=true
 end
 local solo_active=false
 mod.io_solo_history=function() return solo_tracker end
@@ -205,6 +214,23 @@ local function saved_ok(ok)
         if why then mod:info("I/O save failed: %s",why)end
     elseif ok then storage.warned=nil end
 end
+-- the records a SoloPlay match set, by the key of their rows, so a match brought back from its checkpoint names its match on them as the co-op one does
+local function solo_credit_keys(m)
+    local rows,key_of=solo_tracker.data.rows or {},{}
+    for k in pairs(m.recovery_rows or {})do if rows[k]then key_of[rows[k]]=k end end
+    local function keyed(refs,kept,field)
+        local top,out={},{}
+        local function add(k,id,value)
+            if type(k)~="string"or id==nil or type(value)~="number"then return end
+            top[k]=top[k]or {};local t=top[k][id]
+            if not t then t={key=k,[field]=id,value=value};top[k][id]=t;out[#out+1]=t elseif value>t.value then t.value=value end
+        end
+        for _,u in ipairs(kept or {})do add(u.key,u[field],u.value)end
+        for _,u in ipairs(refs or {})do add(key_of[u.row],u[field],u.value)end
+        return out[1]and out or nil
+    end
+    return keyed(m.record_updates,m.record_update_keys,"name"),keyed(m.enemy_updates,m.enemy_update_keys,"enemy")
+end
 local click_job,click_rest,result_kept
 local function save(force,checkpoint_only,sliced)
     if not force and (tracker.mission or solo_tracker.mission) then return end
@@ -221,7 +247,8 @@ local function save(force,checkpoint_only,sliced)
     if solo_tracker.mission then
         local function clone(value) if type(value)~="table" then return value end;local copy={};for k,v in pairs(value) do copy[k]=clone(v) end;return copy end
         solo_checkpoint={}
-        for _,field in ipairs({"started_at","context","full","exploded","failed","damage","record_values","replay_best","replay_armour","replay_kill_segments","replay_blo_contexts","replay_blo_best","kills","incidents","friendly_fire_pairs","pickup_pairs","pickup_states","team_psykers","field_improvisation","enemy_lethality","hyper_critical","haymaker","class_events","clutches","clutch_bot_recovered","operative_clutches","kill_categories","leave_hits","departure_snapshot","departure_events","all_departures","segments","resumed","bot_links","bot_candidates","bot_appearances","bot_pickup_events","last_departure","last_observed_clock","ended_clock","ended_wall","measurements","boss_seen","boss_credit_seen","boss_operative_seen","boss_operatives","boss_kills","departed_players","players_left","lethality_events","lethality_active","enemy_kill_counts"}) do solo_checkpoint[field]=clone(solo_tracker.mission[field]) end
+        for _,field in ipairs({"started_at","context","full","exploded","failed","damage","record_values","replay_best","replay_armour","replay_kill_segments","replay_blo_contexts","replay_blo_best","kills","incidents","friendly_fire_pairs","pickup_pairs","pickup_states","team_psykers","field_improvisation","enemy_lethality","hyper_critical","haymaker","class_events","clutches","clutch_bot_recovered","operative_clutches","kill_categories","leave_hits","departure_snapshot","departure_events","all_departures","segments","resumed","bot_links","bot_candidates","bot_appearances","bot_pickup_events","last_departure","last_observed_clock","ended_clock","ended_wall","measurements","boss_seen","boss_credit_seen","boss_operative_seen","boss_operatives","boss_kills","departed_players","players_left","lethality_events","lethality_active","enemy_kill_counts","timing_origin","completion_time","completion_markers","timing_diagnostics","barrel_pops","team_damage","party_records","support","psyk_dps","recovery_rows","experimental"}) do solo_checkpoint[field]=clone(solo_tracker.mission[field]) end
+        solo_checkpoint.record_update_keys,solo_checkpoint.enemy_update_keys=solo_credit_keys(solo_tracker.mission)
     end
     -- setting it marks the catalog changed, so with no SoloPlay match under way every 15 s hub save would build the catalog again
     if solo_checkpoint or mod.io_data_get("solo_unfinished_v1")~=nil then mod.io_data_set("solo_unfinished_v1",solo_checkpoint,false)end
@@ -315,7 +342,7 @@ local function context(action, allow_training_blo, global_blo)
     if havoc then difficulty = havoc_data and havoc_data.havoc_rank or "havoc-rank-unverified" end
     if allow_training then havoc=false;difficulty="psykhanium" end
     local wt=action._weapon_template or {}
-    local grenade=wt.ammo_template=="grenade"
+    local grenade=wt.is_grenade_ability_weapon==true or wt.ammo_template=="grenade"
     for _,keyword in ipairs(wt.keywords or {}) do if keyword=="grenade" then grenade=true end end
     local mission_instance
     local connection=Managers.connection
@@ -432,8 +459,8 @@ local function update_derived_cache(dt)
   overview_cache=prepare_job.out;prepare_job=nil
   overview_cache.version=Averages.CACHE_VERSION;overview_cache.signature=cache_signature();mod.io_data_set("history_overview_cache_v1",overview_cache)
   revisions:commit(cache_signature());revisions:stamp();store_revision()
-  -- in the hub its save is spread over frames too
-  friend_signature=nil;save(true,nil,not hidden)
+  -- its save is spread over frames, on a loading screen too, where one written in one go held a frame some 130 ms
+  friend_signature=nil;save(true,nil,true)
   return
  end
  if rebuild_job and (rebuild_job.signature~=rebuild_inputs()or rebuild_job.data~=tracker.data)then rebuild_job=nil end
@@ -467,7 +494,11 @@ local function update_derived_cache(dt)
 end
 -- Opening the Psykhanium tab reads every saved log; read them here a few a second instead. A missing or out of date
 -- mission summary is counted again here too, a few milliseconds a frame, once the history replay above is done.
-local People,Slots,Social,Stats,bench_wait
+local People,Slots,Social,Stats,BossWarm,bench_wait
+-- the history and screens the hub warm-up last finished on, and those the boss read last came round the list on
+local bench_done,boss_round=setmetatable({},{__mode="v"}),setmetatable({},{__mode="v"})
+local function bench_same(s,d,sc,se)local h=d.run_history;return h~=nil and s.h==h and s.n==#h and s.seq==d.run_sequence and s.rev==d.history_policy_revision and s.sc==sc and s.se==se end
+local function bench_set(s,d,sc,se)local h=d.run_history;s.h,s.n,s.seq,s.rev,s.sc,s.se=h,#h,d.run_sequence,d.history_policy_revision,sc,se end
 -- the Squad Social records read the same match files, so with the screen on they are read ahead too, not one a frame under the cursor
 local function social_warm()
  if mod:get("screen_social")==false then return true end
@@ -494,7 +525,17 @@ local function warm_bench(dt)
  bench_wait=(bench_wait or 0)+dt;if bench_wait<.2 then return end;bench_wait=0
  People=People or mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/io_data_people")
  -- the Weapons page reads each match's damage by armour from what is read here, a match at a time
- if People.warm()then Slots=Slots or mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/run_slots");local h=tracker.data.run_history;local _,at=Slots.warm(h);share_warm(at);social_warm()end
+ if People.warm()then Slots=Slots or mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/run_slots");local d=tracker.data;local h=d.run_history
+  -- once all of it is in, the history is not walked again until it or the screens change
+  local sc,se=mod:get("screen_social"),mod:get("screen_endscreen")
+  if bench_same(bench_done,d,sc,se)then return end
+  local a,at=Slots.warm(h);local b=share_warm(at);local c=social_warm();local e=true
+  -- the End Screen's Boss Damage average reads each match's boss damage, so a match that saved before it kept that has it read ahead too
+  -- it reads a slice a call, so it counts as done only after a whole round of the list on the same history
+  if se~=false then BossWarm=BossWarm or mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/warm_parts")
+   if BossWarm.boss_warm(h)then e=h~=nil and bench_same(boss_round,d,sc,se);if h then bench_set(boss_round,d,sc,se)end else e=false end end
+  if h and a and b and c and e then bench_set(bench_done,d,sc,se)end
+ end
 end
 -- On a loading screen a held frame goes unseen, so the match files the hub would read a match at a time are read there,
 -- and the modules that read them load there, rather than holding hub frames.
@@ -533,8 +574,9 @@ local SaveTidy=mod:io_dofile("InformationOverload/scripts/mods/InformationOverlo
 local tidy_wait=0
 local function tidy(dt)
  if SaveTidy.done then return end
- if not hub_ready()or hub_wait<3 or tracker.mission or solo_tracker.mission or collectors and collectors:partial_pending()or rebuild_job or prepare_job
-  or not storage.ready or storage.job or storage.pending or storage.journal_active or tracker.dirty or solo_tracker.dirty or psykhanium_logs.dirty then tidy_wait=0;return end
+ -- the open panel holds the match it shows, which a step would let go; a part read is dropped when the tidy has to wait
+ if not hub_ready()or hub_wait<3 or mod.io_view_open or tracker.mission or solo_tracker.mission or collectors and collectors:partial_pending()or rebuild_job or prepare_job
+  or not storage.ready or storage.job or storage.pending or storage.journal_active or tracker.dirty or solo_tracker.dirty or psykhanium_logs.dirty then tidy_wait=0;if SaveTidy.busy then SaveTidy.drop()end;return end
  tidy_wait=tidy_wait+dt;if tidy_wait<.5 and not SaveTidy.busy then return end;tidy_wait=0
  if SaveTidy.step()then click_rest=true end
 end
@@ -563,19 +605,22 @@ mod.update = function(dt)
     if not tidy_off and not frame("Tidy",tidy,dt)then tidy_off=true end
     frame("Save",update_stats)
 end
-local function boundary()
+-- sliced, from leaving a mission whose result is already in its checkpoint: the save spreads over frames as the end screen comes up, rather
+-- than taking back the one already spreading and writing it all in one frame
+local function boundary(sliced)
     warm_off=false
     if collectors then frame("Collectors",collectors.boundary,collectors)end
     if mod.io_scoreboard then mod.io_scoreboard.state.t0=nil;if mod.io_scoreboard.input then pcall(mod.io_scoreboard.input.release)end end
-    frame("Mission end",tracker.boundary,tracker); last_shot = setmetatable({}, {__mode = "k"}); frame("Save",save,true)
+    frame("Mission end",tracker.boundary,tracker); last_shot = setmetatable({}, {__mode = "k"}); frame("Save",save,true,nil,sliced and result_kept==true or nil)
 end
 -- off the hub every save leaves the shared records for the hub, so a quit with no mission under way writes them
 mod.on_unload = function() local playing=tracker.mission or solo_tracker.mission or collectors and collectors:partial_pending();boundary();if storage.pending and not playing then saved_ok(storage:flush())end end
--- switched off, I/O's hooks no longer run, so each screen puts the game's own widgets back here
-mod.on_disabled = function() boundary();for _,s in pairs(mod.io_screens or {})do if type(s)=="table"and s.off then pcall(s.off)end end end
+-- switched off, I/O's hooks no longer run, so each screen puts the game's own widgets back here, and the mod list its plain name
+-- a mission under way is kept as data only, as I/O never sees how it ends, so it counts no loss and breaks no streak
+mod.on_disabled = function() local m=tracker.mission;if m and not m.context.solo then m.data_only=true end;boundary();for _,s in pairs(mod.io_screens or {})do if type(s)=="table"and s.off then pcall(s.off)end end;if mod.io_options_name then pcall(mod.io_options_name.off)end end
 mod.on_game_state_changed = function(status, state)
     if state == "StateGameplay" and status == "exit" then
-        boundary(); psykhanium_session, psykhanium_manager = nil, nil
+        boundary(true); psykhanium_session, psykhanium_manager = nil, nil
     end
 end
 mod.on_setting_changed = function(id)
@@ -624,11 +669,6 @@ local api = {
         return name and Missions[name] and Missions[name].is_hub==true
     end,
     observe_blo_shot = observe_blo,
-    save_training_snapshot = function(source)
-        if not tracker:add_training_snapshot(source) then return false,"No active Psykhanium session available." end
-        save() -- Explicit test import is allowed while the live collector remains temporary.
-        return true
-    end,
     dashboard_tracker = function() return tracker end,
     tracker = function() return psykhanium_session or (solo_active and solo_tracker) or tracker end,
     context = function(action)
@@ -877,8 +917,9 @@ do
         local d = tracker.data
         -- a recount, Rebuild, Import or Restore lands a new data table
         local h1, h2, h3, h4, h5 = differs(30, #(d.run_history or EMPTY)), differs(31, d.run_sequence or 0), differs(32, d.history_policy_revision or 0), differs(33, mod.io_times_revision or 0), differs(34, d)
-        local h6 = differs(35, mod.io_history_touched or 0)
-        if h1 or h2 or h3 or h4 or h5 or h6 then history_revision = history_revision + 1 end
+        -- the history's times are worked out on the Boss timing setting, so changing it is a new history to a reader
+        local h6, h7 = differs(35, mod.io_history_touched or 0), differs(36, mod.io_display_options and mod.io_display_options().boss_map_timing == true)
+        if h1 or h2 or h3 or h4 or h5 or h6 or h7 then history_revision = history_revision + 1 end
         return live_revision, history_revision
     end
 
@@ -1055,13 +1096,26 @@ do
         return own_useful, team_useful, own_reported
     end
 
+    -- a match's time as the pages give it: the server's ahead of the clock, and a clock win timed on the basis Settings has now
+    local Times
+    local function seconds_of(r)
+        Times = Times or mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/mission_times")
+        local t = Times.completion(r)
+        if r.victory and t and t.source == "mission_clock" then
+            local marks, boss = r.completion_markers or {}, mod.io_display_options().boss_map_timing
+            local chosen = boss and Times.boss_death(r) or marks.victory_request or marks.victory_transition or marks.win_condition ~= marks.boss_death and marks.win_condition
+            return chosen and Times.marker(r, chosen) or nil
+        end
+        return t and t.seconds or nil
+    end
+
     -- a finished match as a list shows it, from what the match keeps in memory, so a list of every match reads nothing from disk
     local function slim(r)
         local c, k = r.context or {}, r.kill_categories or {}
         local own_useful, team_useful, own_reported = damage_of(r)
         return {
             id = r.id, victory = r.victory, full = r.full ~= false, run_kind = r.run_kind, started_at = r.started_at,
-            seconds = r.completion_time and r.completion_time.seconds or nil,
+            seconds = seconds_of(r),
             mission = c.mission_name, display_name = c.mission_display_name, difficulty = c.difficulty, mode = c.mode, patch = c.patch,
             class = c.class, character = c.character ~= nil and tostring(c.character) or nil, character_name = c.character_name,
             kills = { total = type(r.kills) == "number" and r.kills or 0, elite = k.elite or 0, special = k.special or 0, boss = k.boss or 0 },
@@ -1202,13 +1256,16 @@ do
 end
 part("Scoreboard",function()mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/scoreboard_hud")(mod,collectors,api)end)
 part("Mission timer",function()mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/mission_timer_hud")(mod,collectors,mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/mission_times"))end)
+part("Social fetches",function()mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/social_fetches")(mod)end)
 -- The screens I/O adds to, each left out if it fails to load; Scoreboard and Tracker are scoreboard_hud's, so their entries only name them.
-mod.io_screens={scoreboard={id="scoreboard",name="Scoreboard",place="Mission",icon="scoreboard",rows={}},tracker={id="tracker",name="Tracker",place="Mission",icon="speed",rows={}}}
+mod.io_screens={scoreboard={id="scoreboard",name="Scoreboard",place="Mission",icon="scoreboard",rows={
+ {key="hide_game_scoreboard",label="Remove Game's Scoreboard",help="Remove the game's own end of mission scoreboard and prompt.",kind="toggle",default=true}}},tracker={id="tracker",name="Tracker",place="Mission",icon="speed",rows={}}}
 do
  local function screen(id,path)local ok,m=pcall(function()return mod:io_dofile(path)(mod,api,collectors)end);if ok and m then mod.io_screens[id]=m else mod:error("I/O %s: %s",id,tostring(m))end end
  screen("charselect","InformationOverload/scripts/mods/InformationOverload/screen_charselect")
  screen("social","InformationOverload/scripts/mods/InformationOverload/screen_social")
  screen("board","InformationOverload/scripts/mods/InformationOverload/screen_board")
+ screen("havoc","InformationOverload/scripts/mods/InformationOverload/screen_havoc")
  screen("endscreen","InformationOverload/scripts/mods/InformationOverload/screen_endscreen")
 end
 mod.io_api = api
@@ -1405,7 +1462,7 @@ end
 mod:command("io_reset", "Move all saved statistics into a backup, after a confirmation", mod.io_request_reset)
 mod:command("io_restore", "Bring back the latest backup, after a confirmation", function()mod.io_request_restore(false)end)
 
-mod.version="1.0.4"
+mod.version="1.1.0"
 
 
 -- Draft integration seam for the data interface; no UI/navigation changes.
@@ -1417,8 +1474,9 @@ mod:command("io_analysis_export","Export accepted Match History and observed mea
  local runs=tracker.data.run_history or {}
  local export=AnalysisExport.build(runs)
  if mod.io_api and mod.io_api.tracker then local live=mod.io_api.tracker().mission;if live and (live.measurements or live.experimental) then export.live_observation=AnalysisExport.live(live.measurements or live.experimental,live.context);export.live_observation.combat_timeline=live.combat_timeline end end
- local stem="exports/playstyle-"..tostring(os.time());local path=stem..".json";local index=1;while storage.a.read(path)do path=stem.."-"..index..".json";index=index+1 end
- local ok=storage.a.write(path,storage.a.json.encode(export));mod:echo(ok and "Measurements export saved: InformationOverload/%s"or "Measurements export failed: %s",path)
+ local a=storage.a;if storage.unavailable or not a then mod:echo("Measurements export failed: saving is off.");return end
+ local stem="exports/playstyle-"..tostring(os.time());local path=stem..".json";local index=1;while a.read(path)do path=stem.."-"..index..".json";index=index+1 end
+ a.failure=nil;local ok=a.write(path,a.json.encode(export));if ok then mod:echo("Measurements export saved: InformationOverload/%s",path)else mod:echo("Measurements export failed: %s",a.failure or "could not write "..path)end
 end)
 mod:command("io_intro", "Play the first-open intro and the End Screen tip again", function()
     mod:set("intro_seen",nil);mod:set("endscreen_debrief_tip_seen",nil);mod.io_intro_broken=nil
@@ -1466,3 +1524,34 @@ do local typed=mod.io_data_get("manual_times_v1")
   end
  end
 end
+-- Havoc is independently optional and consumes no combat observations.
+-- Keep its lifecycle wiring here; implementation and state belong to its modules.
+do
+    local havoc = mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/havoc_board")(mod, {
+        dashboard_tracker = function() return tracker end,
+    })
+    mod.io_havoc = havoc.api
+    local update, disabled, unload = mod.update, mod.on_disabled, mod.on_unload
+    local setting_changed, game_state_changed = mod.on_setting_changed, mod.on_game_state_changed
+    mod.update = function(dt)
+        if update then update(dt) end
+        frame("Havoc board", havoc.update, dt)
+    end
+    mod.on_disabled = function(...)
+        havoc.stop()
+        if disabled then return disabled(...) end
+    end
+    mod.on_unload = function(...)
+        havoc.stop()
+        if unload then return unload(...) end
+    end
+    mod.on_setting_changed = function(id, ...)
+        if id == "havoc_board" or id == "screen_havoc" then havoc.stop() end
+        if setting_changed then return setting_changed(id, ...) end
+    end
+    mod.on_game_state_changed = function(status, state, ...)
+        havoc.game_state_changed(status, state)
+        if game_state_changed then return game_state_changed(status, state, ...) end
+    end
+end
+do local ok,e=pcall(function()return mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/options_name")(mod)end);if ok then mod.io_options_name=e else mod:error("I/O options name: %s",tostring(e))end end

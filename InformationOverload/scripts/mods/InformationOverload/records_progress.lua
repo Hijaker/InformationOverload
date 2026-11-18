@@ -89,8 +89,6 @@ function Records:team_psyker_detonation(personal,id)
     if id then m.team_psykers.members=m.team_psykers.members or {};m.team_psykers.members[id]=(m.team_psykers.members[id] or 0)+1 end
     -- Another operative can never reset the local-only personal record.
     if personal then self:psyker_explosion() end
-    self:mode_streak(m.context.patch,m.context.mode).current.psyker_no_detonations=0
-    self:class_mode_streak(m.context.patch,m.context.mode,m.context.class).current.psyker_no_detonations=0
     self.dirty=true
 end
 -- The enemies a burst has killed are kept live only, by unit, so two of one type both count and none reach a save.

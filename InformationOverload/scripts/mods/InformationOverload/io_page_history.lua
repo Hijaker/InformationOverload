@@ -10,6 +10,8 @@ local Averages=mod:io_dofile(base.."history_averages")
 local Times=mod:io_dofile(base.."mission_times")
 local Patch=mod:io_dofile(base.."game_patch")
 local C,DASH,fmt,one=D.c,Overview.dash,Data.fmt,Data.one
+local SEED={scab="Scabs",dreg="Dregs",mixed="Mixed"}
+local SEED_GREY=D.rgba(160,160,160)
 local PAGE,RH=100,26
 local ARMOUR={unarmored="Unarmoured",disgustingly_resilient="Infested",berserker="Maniac",resistant="Unyielding",armored="Flak",super_armor="Carapace",unknown="Unknown"}
 local COLS={date=108,id=246,map=304,diff=568,result=674,class=841,kills=1033,dmg=1147,time=D.right-20}
@@ -26,14 +28,25 @@ local function state(view)
  if st.key~=key then st.key=key;st.page=1;st.fp={}end
  return st
 end
+-- on a scope change, drop picks the new scope's panel has no row for, so no filter stays on out of sight
+local function prune(st,rows,mode,patch_label)
+ if st.pruned==st.key then return end;st.pruned=st.key;if Data.filter_count(st.f,mode)==0 then return end
+ local o,f=Data.options(rows,mode,patch_label,Data.blank_filters(),true),st.f
+ for _,k in ipairs({"res","date","cls","faction","team","mods","maps","players"})do
+  local list=o[k]or k=="mods"and {}or nil -- modifiers have no row outside havoc but still count
+  if list and (k~="faction"or mode=="havoc")then local have={};for _,e in ipairs(list)do if e.v~=nil then have[e.v]=true end end
+   if type(f[k])=="table"then for v in pairs(f[k])do if not have[v]then f[k][v]=nil end end elseif f[k]~="all"and not have[f[k]]then f[k]="all"end
+  end
+ end
+end
 -- the filter panel: four lists over two rows, each list paged when it runs long
 local function filters(view,popup,st,opts,matched,mode)
  local x0,y0,W=D.left,D.row2+38,D.width;local cw=W/4;local f=st.f
  local top={{"Result","res",opts.res,"one"},{"Date","date",opts.date,"one"},{"Your Class","cls",opts.cls,"one"},{"Team Had","team",opts.team,"all"}}
- local kept=0;for _,k in ipairs(opts.kinds)do if not f.kinds[k.v]then kept=kept+1 end end
  local bottom={{"Played With (All Of)","players",opts.players,"all"}}
  if mode=="havoc"then bottom[#bottom+1]={"Modifiers (All Of)","mods",opts.mods or {},"all"}end
- bottom[#bottom+1]={"Maps","maps",opts.maps,"except"};bottom[#bottom+1]={"Runs: "..kept.." Of "..#opts.kinds,"kinds",opts.kinds,"except"}
+ bottom[#bottom+1]={"Maps","maps",opts.maps,"except"}
+ if mode=="havoc"then bottom[#bottom+1]={"Enemy Type","faction",opts.faction,"one"}end
  local function most(list)local n=0;for _,s in ipairs(list)do n=math.max(n,#s[3])end;return math.max(1,n)end
  local nt=math.min(most(top),9);local th=44+RH*nt
  local nb=math.min(most(bottom),math.max(3,math.floor((660-50-th-44)/RH)));local bh=44+RH*nb;local h=th+bh+50
@@ -76,7 +89,7 @@ local function tag(cv,x,y,win,w)
 end
 -- the Filters button and its panel, shared by Runs and Averages
 local function filter_button(view,cv,popup,st,rows,mode,matched)
- local nf=Data.filter_count(st.f);local open=view.dd=="io_hist_filters"
+ local nf=Data.filter_count(st.f,mode);local open=view.dd=="io_hist_filters"
  view:_ctl(cv,"base",FILTER_X,D.row2,280,34,function()view.dd=not open and "io_hist_filters"or nil end,{open=open,sel=nf>0 and not open})
  cv:text("Filters"..(nf>0 and " ("..nf..")"or ""),FILTER_X+12,D.row2,220,34,16,nf>0 and C.gold_hi or C.value);cv:chevron(FILTER_X+256,D.row2+13,"down",10,C.value)
  if open then filters(view,popup,st,Data.options(rows,mode,view.scope.patch and Patch.display(view.scope.patch)or DASH,st.f,true),matched,mode)end
@@ -111,7 +124,13 @@ local function runs(view,cv,popup,st,rows,mode)
   local dw=view:_w(r.date,16);cv:text(r.date,COLS.date,ry,dw+4,32,16,C.label);cv:text(r.clock,COLS.date+dw+6,ry,60,32,14,C.muted)
   -- the match's own number, the one its page shows, so it can be found again
   cv:text("#"..tostring(r.id or DASH),COLS.id,ry,COLS.map-COLS.id-6,32,14,C.muted,"left",D.font.medium)
-  cv:text(r.map,COLS.map,ry,COLS.diff-COLS.map-12,32,16,C.value);cv:text(view:_fit(r.diff,16,COLS.result-COLS.diff-6),COLS.diff,ry,COLS.result-COLS.diff-6,32,16,C.value)
+  local seed=mode=="havoc"and SEED[r.faction]
+  local map_width=COLS.diff-COLS.map-12
+  local seed_width=seed and view:_w(seed,10)or 0
+  local name=view:_fit(r.map,16,map_width-(seed and seed_width+8 or 0))
+  cv:text(name,COLS.map,ry,map_width-seed_width,32,16,C.value)
+  if seed then cv:text(seed,COLS.map+map_width-seed_width-2,ry,seed_width+2,32,10,SEED_GREY,"right")end
+  cv:text(view:_fit(r.diff,16,COLS.result-COLS.diff-6),COLS.diff,ry,COLS.result-COLS.diff-6,32,16,C.value)
   local tw=tag(cv,COLS.result,ry,r.win,rw);if r.partial then cv:text("Partial",COLS.result+tw+6,ry,80,32,13,C.muted,"left",D.font.medium)end
   cv:text(Overview.class_names[r.cls]or DASH,COLS.class,ry,150,32,16,C.value)
   cv:text(r.kills and Overview.commas(r.kills)or DASH,COLS.kills-150,ry,150,32,16,r.kills and C.value or C.muted,"right")
@@ -172,7 +191,7 @@ local function averages(view,cv,popup,st,rows,mode)
  local cls=st.f.cls~="all"and st.f.cls or nil
  local opts={{value="all",label="Overall",current=cls or "all"}};for _,c in ipairs(classes)do opts[#opts+1]={value=c,label=Overview.class_names[c],current=cls or "all"}end
  Data.dropdown(view,cv,popup,"io_hist_cls",CLASS_X,D.row2,280,"Your Class:",cls and Overview.class_names[cls]or "Overall",opts,function(v)st.f.cls=v;st.page=1 end)
- local kept=Data.apply(rows,st.f,mode,"new");local nf=Data.filter_count(st.f)
+ local kept=Data.apply(rows,st.f,mode,"new");local nf=Data.filter_count(st.f,mode)
  filter_button(view,cv,popup,st,rows,mode,#kept)
  if #kept==0 and nf>0 then return no_match(view,cv,st)end
  local list={};for _,r in ipairs(kept)do if selection=="average"or Averages.extreme_eligible(r.run)then list[#list+1]=r.run end end
@@ -180,7 +199,7 @@ local function averages(view,cv,popup,st,rows,mode)
  if selection=="average"then a,wait=averaged(view,list,mode)
  else
   a,extremes=projected(view,list,mode,selection)
-  if not a then view.io_dirty=true;view:_card(cv,D.left,D.sheet,D.width,92,"Preparing Saved Matches","Min/Max will be available after history preparation in the hub.");return end
+  if not a then view.redraw_at=math.min(view.redraw_at or math.huge,(view.now or 0)+1);view:_card(cv,D.left,D.sheet,D.width,92,"Preparing Saved Matches","Min/Max will be available after history preparation in the hub.");return end
  end
  if not a or (a.games or 0)==0 then view:_card(cv,D.left,D.sheet,D.width,92,wait>0 and "Counting Missions"or selection~="average"and "No Completed Missions"or "No Averages Yet");return end
  local function selected_value(key,average_value,format)
@@ -260,5 +279,6 @@ return function(view,cv,popup)
  local hk=table.concat({view:_revision(),tostring(s.mode),tostring(s.diff),tostring(s.patch),tostring(o.boss_map_timing)},"|")
  local hc=view.io_hist_rows;if not hc or hc.key~=hk then hc={key=hk,rows=Data.history(tracker,s)};view.io_hist_rows=hc end
  local rows=hc.rows
+ prune(st,rows,view.scope.mode,s.patch and Patch.display(s.patch)or DASH)
  if cur=="runs"then runs(view,cv,popup,st,rows,view.scope.mode)else averages(view,cv,popup,st,rows,view.scope.mode)end
 end

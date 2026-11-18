@@ -1,4 +1,5 @@
-local A={CACHE_VERSION="history-projections-2"}
+local mod=get_mod("information_overload")
+local A={CACHE_VERSION="history-projections-3"}
 local function bucket()return {games=0,wins=0,damage=0,damage_games=0,team_damage=0,defense={downs=0,deaths=0,pickups=0},defense_games=0}end
 local function add(a,b)for _,k in ipairs({"downs","deaths","pickups"})do a[k]=a[k]+(b and b[k]or 0)end end
 local function merge_numbers(target,source)
@@ -78,17 +79,11 @@ function A.extreme_row(run,T,R,summary)
  if (a.damage_games or 0)>0 then
   put("damage",a.damage)
   if a.damage>0 then for k,n in pairs(a.armour)do put("armour."..k,n/a.damage)end end
-  for id,p in pairs(run.team_damage and run.team_damage.members or {})do
-   if id~="unknown_operative"then
-    local actor=(c.operative_roster or {})[tostring(id)]or {}
-    local class=p.class or actor.class or (tostring(id)==tostring(c.character)and c.class)
-    if class then
-     local raw=T.summary(run.team_damage,id,"total").useful
-     put("class."..class..".damage",raw)
-     if a.damage>0 then put("class."..class..".share",raw/a.damage)end
-    end
-   end
-  end
+  -- a class's figure is every operative of that class combined, as Average does
+  for class,v in pairs(a.classes)do if (v.damage_games or 0)>0 then
+   put("class."..class..".damage",v.damage/v.damage_games)
+   if v.team_damage>0 then put("class."..class..".share",v.damage/v.team_damage)end
+  end end
  end
  local me=c.class and a.personal[c.class]
  if me and (me.damage_games or 0)>0 then put("personal.damage",me.damage)end
@@ -99,15 +94,8 @@ function A.extreme_row(run,T,R,summary)
   local counts=R.incident_counts(run)
   if counts.personal then for _,k in ipairs({"downs","deaths","pickups"})do
    put("personal.defense."..k,(counts.personal[k]or 0)/a.defense_games)
-   if c.class then put("class."..c.class..".defense."..k,(counts.personal[k]or 0)/a.defense_games)end
   end end
-  -- a teammate with no incident has no members row, so the roster counts them as 0, as Average does
-  for id,actor in pairs(c.operative_roster or {})do if not actor.personal and tostring(id)~=tostring(c.character)then
-   local p=counts.members and counts.members[tostring(id)]or {};local class=p.class or actor.class
-   if class then for _,k in ipairs({"downs","deaths","pickups"})do
-    put("class."..class..".defense."..k,((p.counts or {})[k]or 0)/a.defense_games)
-   end end
-  end end
+  for class,v in pairs(a.classes)do if (v.defense_games or 0)>0 then for k,n in pairs(v.defense)do put("class."..class..".defense."..k,n/v.defense_games)end end end
  end
  if (a.friendly and a.friendly.games or 0)>0 then
   for _,k in ipairs({"damage","murders","suicides"})do put("friendly."..k,(a.friendly[k]or 0)/a.friendly.games)end
@@ -143,8 +131,9 @@ function A.prepare_step(job,more)
    local values=reuse and previous.extremes and previous.extremes[id]
    -- A fresh row decodes a whole match file; step the collector after each, or a full rebuild piles up hundreds of MB of dead matches before Lua starts its next cycle.
    if not row or not values then
-    row=row or A.build({run},(run.context or {}).mode,job.T,job.R)
-    values=A.extreme_row(run,job.T,job.R,row);collectgarbage("step",4096);built=true
+    -- a match whose file cannot be read counts nothing and is tried again next time, so one bad file never stops the rest
+    local ok;ok,row,values=pcall(function()local r=row or A.build({run},(run.context or {}).mode,job.T,job.R);return r,A.extreme_row(run,job.T,job.R,r)end)
+    if not ok then if not job.told then job.told=true;mod:error("I/O Averages, match %s: %s",id,tostring(row))end;row,values,key={},{},nil end;collectgarbage("step",4096);built=true
    end
    out.rows[id]=row;out.extremes[id]=values;out.tokens[id]=key
   end

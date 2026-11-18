@@ -10,83 +10,217 @@ local CORNERS={{0,0},{1,0},{0,1},{1,1}}
 -- the plain table stays 950 wide, short of the Tab overlay's Penances
 local COLS={{"Damage",520,"damage"},{"Kills",600,"kills"},{"Elites",680,"elites"},{"Specials",760,"specials"},{"Downs",840,"downs"},{"Deaths",920,"deaths"}}
 local CARD={{"Kills","kills"},{"Elites","elites"},{"Specials","specials"}}
-local STRIP={"kills","elites","specials","downs","deaths"}
-local parts={}
+-- the Strip's line of figures on each page: the field, then its name for one and for any other number
+local STRIP={{"kills","kill","kills"},{"elites","elite","elites"},{"specials","special","specials"},{"downs","down","downs"},{"deaths","death","deaths"}}
+local STRIP_SUPPORT={{"revives","revive","revives"},{"saves","save","saves"},{"blocked","blocked","blocked"},{"dodged","dodged","dodged"},{"blitzes","blitz","blitzes"},{"abilities","ability","abilities"}}
 local function box(pen,x,y,w,h,edge)
  pen:rect(x,y,w,h,C.box)
  pen:rect(x,y,w,2,edge,1);pen:rect(x,y+h-2,w,2,edge,1);pen:rect(x,y,2,h,edge,1);pen:rect(x+w-2,y,2,h,edge,1)
  for _,v in ipairs(CORNERS)do pen:rect(x+v[1]*(w-12),y+v[2]*(h-2),12,2,C.corner,2);pen:rect(x+v[1]*(w-2),y+v[2]*(h-12),2,12,C.corner,2)end
 end
 local function bar(pen,x,y,w,k,fill)pen:rect(x,y,w,5,C.track,1);if k>0 then pen:rect(x,y,math.max(1,w*math.min(1,k)),5,fill,2)end end
-local function num(n)return n and S.commas(n)or DASH end
-function W.tm(pen,x,y,t,seconds)
- local rt,rl,ahead=S.record(t,seconds);local w,h=S.size("tm",nil,nil,rt~=nil)
+-- figures are kept once worked out, so a held panel makes no new strings a frame; let go when it grows large
+local CC,cc_n={},0
+local function commas(n)if n==nil then return DASH end;local s=CC[n];if not s then if cc_n>600 then CC,cc_n={},0 end;s=S.commas(n);CC[n]=s;cc_n=cc_n+1 end;return s end
+local function num(n)return n and commas(n)or DASH end
+-- a pen's kept measures, per UI scale: text widths by font and size, and the fits worked out from them
+local function kept(pen)
+ local all=pen.io_widths;if not all or all.n>600 then all={n=0};pen.io_widths=all end
+ local key=pen.k or 1;local per=all[key];if not per then per={};all[key]=per end;return per,all
+end
+local function mw(pen,s,size,font)
+ local per,all=kept(pen);font=font or F.body
+ local byf=per[font];if not byf then byf={};per[font]=byf end;local bys=byf[size];if not bys then bys={};byf[size]=bys end
+ local v=bys[s];if not v then v=pen:width(s,size,font);bys[s]=v;all.n=all.n+1 end;return v
+end
+local function tw(pen,s,size,font,k)return pen.width and mw(pen,s,size,font)or #s*size*k end
+-- the kill kinds' colours on the Tracker Panel's mix bar, in S.CATS order: melee horde, ranged horde, elite, special, boss
+local MIX={D.rgba(169,191,153,1),D.rgba(104,146,170,1),D.rgba(221,183,99,1),D.rgba(196,96,64,1),D.rgba(236,214,160,1)}
+-- the key's items, each name with its count and colour, kept between frames
+local ITEMS={}
+local function key_items(cats)
+ for i,e in ipairs(cats)do local it=ITEMS[i]or {};ITEMS[i]=it;it[1],it[2],it[3]=e[1],commas(e[2]or 0),MIX[i]or C.label end
+ for i=#ITEMS,#cats+1,-1 do ITEMS[i]=nil end;return ITEMS
+end
+local function key_iw(pen,it,s,pad,k)return pad+tw(pen,it[1],s,F.medium,k)+5+tw(pen,it[2],s+2,F.title,k)end
+local function key_sum(pen,s,pad,k)local n=0;for _,it in ipairs(ITEMS)do n=n+key_iw(pen,it,s,pad,k)end;return n end
+-- the three cells: each streak with its best, and Downs with Deaths
+local CELL={"Kills Before Taking A Hit","Kills Before Losing Health","Downs"}
+local CELL_W={.35,.37,.28}
+local function cell(t,i,raw)
+ if i==1 then return t.streak,t.streak_best and "Mission Best "..GOLD..num(t.streak_best).."{#reset()}"end
+ if i==2 then return t.health_streak,t.health_streak_best and "Best "..GOLD..num(t.health_streak_best).."{#reset()}"end
+ return t.downs,"Deaths "..VALUE..(raw and t.deaths or num(t.deaths)).."{#reset()}"
+end
+-- a label set at size, smaller to 11 where the pen can measure and it runs past w, else cut
+local function fit(pen,s,x,y,w,h,size,c,align)
+ if pen.width then while size>11 and mw(pen,s,size,F.medium)>w do size=size-1 end
+  local n,full=#s,s;while n>4 and mw(pen,s,size,F.medium)>w do n=n-1;s=S.cut(full,n)end
+ end
+ pen:text(s,x,y,w,h,size,c,align or "left",F.medium)
+end
+-- a label on up to two lines of 15, broken at the space nearest its middle where one line runs past w; a second line still too long is fitted
+local function label2(pen,s,x,y,w,c)
+ if not pen.width or mw(pen,s,15,F.medium)<=w then fit(pen,s,x,y,w,18,15,c);return end
+ local per=kept(pen);local m=per[label2];if not m then m={};per[label2]=m end;local by=m[w];if not by then by={};m[w]=by end
+ local v=by[s]
+ if v==nil then
+  local best,cut=math.huge,nil;for i in s:gmatch("() ")do local d=math.abs(mw(pen,s:sub(1,i-1),15,F.medium)-mw(pen,s:sub(i+1),15,F.medium));if d<best then best,cut=d,i end end
+  v=cut and {s:sub(1,cut-1),s:sub(cut+1)}or false;by[s]=v
+ end
+ if not v then fit(pen,s,x,y,w,18,15,c);return end
+ fit(pen,v[1],x,y,w,18,15,c);fit(pen,v[2],x,y+18,w,18,15,c)
+end
+-- the kill best from before this mission: once passed, the old one, all in gold
+local function kills_best(t)
+ if (t.kills or 0)>t.kills_best then return GOLD.."Old Best "..commas(t.kills_best).."{#reset()}"end
+ return "Best Here "..GOLD..commas(t.kills_best).."{#reset()}"
+end
+-- the time to beat the best clear as its own figure under the clock: gold while it is ahead, grey once past; nil with no best to chase
+local function beat(t,seconds)
+ local rt=S.record(t,seconds);if not rt then return nil end
+ local left=t.best_clear-(t.clock_seconds or seconds)
+ if left>0 then return S.clock(t.final and left or math.ceil(left)),t.final and "Under Your Old Best"or "Left To Beat Your Best",true end
+ return "+"..S.clock(-left),"Over Your Best",false
+end
+-- Kills Leads: the clock on the left with a bar toward the best clear and the time to beat under it; Kills across the top of the right with
+-- its best and its mix of kinds; the two kill streaks and Downs in three cells under it, every best a grey label with a gold figure
+-- w widens the Kills side, the clock keeping its column; f scales the whole panel from its corner, through a pen kept on the pen it scales
+local SCALED={}
+function SCALED:rect(x,y,w,h,c,l)local f,ox,oy=self.f,self.ox,self.oy;self.pen:rect(ox+(x-ox)*f,oy+(y-oy)*f,math.max(1,w*f),math.max(1,h*f),c,l)end
+function SCALED:text(s,x,y,w,h,size,c,align,font)local f,ox,oy=self.f,self.ox,self.oy;self.pen:text(s,ox+(x-ox)*f,oy+(y-oy)*f,w*f,h*f,size*f,c,align,font)end
+local function scaled_width(q,s,size,font)return q.pen:width(s,size*q.f,font)/q.f end
+local SCALED_META={__index=SCALED}
+local function scaled(pen,ox,oy,f)
+ local q=pen.io_scaled;if not q then q=setmetatable({pen=pen},SCALED_META);pen.io_scaled=q end
+ q.ox,q.oy,q.f=ox,oy,f;q.width=pen.width and scaled_width or false
+ -- its widths are kept by the whole scale it measures at
+ q.k=f*(pen.k or 1)
+ return q
+end
+function W.tm(pen,x,y,t,seconds,w,f)
+ local bw,h=S.size("tm");w=w or bw;f=f or 1
+ if f~=1 then pen=scaled(pen,x,y,f)end
  box(pen,x,y,w,h,C.frame)
  pen:text(S.cut(t.title,46),x+24,y+12,w-48,34,26,C.value,"left",F.title);pen:rect(x+24,y+52,w-48,1,C.rule,1)
- local ay=y+64;local ax,bx,cx=x+24,x+246,x+478
+ local ay=y+64;local ax,bx=x+24,x+246;local rw=x+w-24-bx
+ -- the clock
  pen:text("Mission Time",ax,ay,200,24,18,C.label,"left",F.medium)
  pen:text(seconds and S.clock(seconds)or DASH,ax,ay+22,210,80,72,C.value,"left",F.title)
  if t.best_clear then
-  bar(pen,ax,ay+112,194,seconds and seconds/t.best_clear or 0,C.label)
-  pen:text("Best Clear",ax,ay+122,120,22,16,C.muted,"left",F.medium);pen:text(S.clock(t.best_clear),ax,ay+122,194,22,16,C.gold,"right",F.medium)
+  local cs=t.clock_seconds or seconds;bar(pen,ax,ay+112,194,cs and cs/t.best_clear or 0,C.gold)
+  pen:text("Best Clear "..GOLD..S.clock(t.best_clear).."{#reset()}",ax,ay+122,194,22,15,C.muted,"left",F.medium)
+  local fig,words,ahead=beat(t,seconds)
+  if fig then pen:rect(ax,ay+152,194,1,C.rule,1)
+   -- level with the cells' figures and their bests on the right
+   pen:text(fig,ax,ay+166,194,36,34,ahead and C.gold or C.muted,"left",F.title)
+   pen:text(words,ax,ay+204,194,18,14,ahead and C.label or C.muted,"left",F.medium)
+  end
  end
- pen:rect(bx-14,ay,1,226,C.rule,1);pen:rect(cx-14,ay,1,226,C.rule,1)
- pen:text("Kill Streak",bx,ay,210,24,18,C.label,"left",F.medium)
- pen:text("Kills Before Taking A Hit",bx,ay+24,210,20,14,C.muted,"left",F.medium)
- pen:text(num(t.streak),bx,ay+44,90,26,24,C.value,"left",F.title)
- if t.streak_best then pen:text("Mission Best "..num(t.streak_best),bx,ay+46,210,22,14,C.gold,"right",F.medium)end
- pen:text("Kills Before Losing Health",bx,ay+72,210,20,14,C.muted,"left",F.medium)
- pen:text(num(t.health_streak),bx,ay+92,90,24,22,C.value,"left",F.title)
- if t.health_streak_best then pen:text("Best "..num(t.health_streak_best),bx,ay+94,210,22,14,C.gold,"right",F.medium)end
- pen:rect(bx,ay+118,210,1,C.rule,1)
- pen:text("Downs",bx,ay+124,210,24,18,C.label,"left",F.medium)
- pen:text(num(t.downs),bx,ay+148,120,50,46,C.value,"left",F.title)
- pen:text("Deaths "..VALUE..t.deaths.."{#reset()}",bx,ay+168,210,22,15,C.muted,"right",F.medium)
- if t.last_down then pen:text("Last: "..S.cut(t.last_down,26),bx,ay+200,210,22,15,C.muted,"left",F.medium)end
- pen:text("Kills",cx,ay,198,24,18,C.label,"left",F.medium)
- pen:text(num(t.kills),cx,ay+24,120,50,46,C.value,"left",F.title)
- if t.kills_best then pen:text("Best Here "..GOLD..S.commas(t.kills_best).."{#reset()}",cx,ay+44,198,22,15,C.muted,"right",F.medium)end
- pen:rect(cx,ay+82,198,1,C.rule,1)
- for i,e in ipairs(t.cats)do local ry=ay+86+(i-1)*28
-  pen:text(e[1],cx,ry,140,28,17,C.muted,"left",F.medium);pen:text(S.commas(e[2]),cx,ry,198,28,22,C.value,"right",F.title)
+ pen:rect(bx-14,ay,1,240,C.rule,1)
+ -- Kills: the figure, and beside it its best over the mix bar; under them the key on one line, each name with its count
+ pen:text("Kills",bx,ay,rw,22,18,C.label,"left",F.medium)
+ local kn=num(t.kills);local kw=pen.width and mw(pen,kn,48,F.title)or #kn*26
+ pen:text(kn,bx,ay+22,kw+8,52,48,C.value,"left",F.title)
+ local sx=bx+kw+28;local sw=x+w-24-sx
+ if t.kills_best then pen:text(kills_best(t),sx,ay+26,sw,20,15,C.muted,"left",F.medium)end
+ local total=0;for _,e in ipairs(t.cats)do total=total+(e[2]or 0)end
+ if total>0 then local cx=sx
+  for i,e in ipairs(t.cats)do if (e[2]or 0)>0 then local cw=math.max(1,(sw-2*(#t.cats-1))*e[2]/total);pen:rect(cx,ay+52,cw,6,MIX[i]or C.label,2);cx=cx+cw+2 end end
+ else pen:rect(sx,ay+52,sw,6,C.track,1)end
+ -- the key's items spread across the whole right side from their own measured widths, smaller where they would not fit
+ local items=key_items(t.cats)
+ local ks=13
+ while ks>9 and key_sum(pen,ks,10,.5)+6*(#items-1)>rw do ks=ks-1 end
+ local gap=#items>1 and math.max(6,(rw-key_sum(pen,ks,10,.5))/(#items-1))or 0;local kx=bx
+ for _,it in ipairs(items)do local nw=tw(pen,it[1],ks,F.medium,.5)
+  local vw=tw(pen,it[2],ks+2,F.title,.5)
+  pen:rect(kx,ay+92,7,7,it[3],2);pen:text(it[1],kx+10,ay+86,nw+2,20,ks,C.muted,"left",F.medium)
+  pen:text(it[2],kx+10+nw+5,ay+86,vw+4,20,ks+2,C.value,"left",F.title);kx=kx+key_iw(pen,it,ks,10,.5)+gap end
+ pen:rect(bx,ay+122,rw,1,C.rule,1)
+ local cx=bx
+ for i=1,3 do local cw=rw*CELL_W[i];local px=i>1 and 14 or 0;local v,best=cell(t,i,true)
+  if i>1 then pen:rect(cx,ay+128,1,112,C.rule,1)end
+  label2(pen,CELL[i],cx+px,ay+128,cw-px-12,C.label)
+  pen:text(num(v),cx+px,ay+166,cw-px,36,34,C.value,"left",F.title)
+  if best then pen:text(best,cx+px,ay+204,cw-px-8,18,14,C.muted,"left",F.medium)end
+  cx=cx+cw
  end
- if rt then local ry=y+h-58
-  pen:rect(ax,ry,w-48,40,ahead and C.gold_tint or C.label_tint,1);pen:rect(ax,ry,4,40,ahead and C.gold or C.label,2)
-  pen:text(rt,ax+16,ry,210,40,22,ahead and C.gold or C.label,"left",F.title)
-  local n,rest=rl:match("^(%S+)(.*)$");pen:text((ahead and GOLD or VALUE)..n.."{#reset()}"..rest,ax+226,ry,w-280,40,18,C.label,"left",F.medium)
- end
- return w,h
+ return w*f,h*f
 end
--- Layout A, in the Tab overlay's top right corner: the game's difficulty icon and the mission, then time, kill streak, downs and kills in one row and the kill kinds under them.
--- f scales it to the slot, cats says whether the kill kinds fit, ic holds the overlay's own difficulty icon; one missing leaves its space empty.
-local TAB_COLS={{24,185},{250,148},{439,148},{628,148}}
-function W.tab(pen,x,y,t,seconds,f,cats,ic)
- f=f or 1;ic=ic or {}
- local function tx(s,ax,ay,aw,ah,size,c,align,font)pen:text(s,x+ax*f,y+ay*f,aw*f,ah*f,size*f,c,align,font)end
- local function rc(ax,ay,aw,ah,c,l)pen:rect(x+ax*f,y+ay*f,math.max(1,aw*f),math.max(1,ah*f),c,l)end
- local w,h=800*f,(cats and 250 or 204)*f
- box(pen,x,y,w,h,C.frame)
- if ic.difficulty and pen.texture then pen:texture(ic.difficulty,x+24*f,y+16*f,44*f,44*f,C.value)end
- local ix=788
- -- the mission and difficulty keep to one line: the size comes down to fit, then the mission's name is cut
- local base,diff=t.mission or t.title,t.difficulty and t.difficulty:upper();local room,size,n=ix-92,34,24
- local function plain()return S.cut(base,n):upper()..(diff and " · "..diff or "")end
+-- the Tab panel draws through these at its corner and scale, set as it starts
+local TP,TX,TY,TF
+local function tx(s,ax,ay,aw,ah,size,c,align,font)TP:text(s,TX+ax*TF,TY+ay*TF,aw*TF,ah*TF,size*TF,c,align or "left",font or F.medium)end
+local function rc(ax,ay,aw,ah,c,l)TP:rect(TX+ax*TF,TY+ay*TF,math.max(1,aw*TF),math.max(1,ah*TF),c,l)end
+-- the engine's Utf8.upper capitalises accented and Cyrillic letters too; string.upper only touches a-z
+local function up(s)local u=Utf8 and Utf8.upper;return u and u(s)or s:upper()end
+-- the mission and difficulty keep to one line: the size comes down to fit, then the mission's name is cut; kept per mission and difficulty
+local function tab_name(pen,base,diff,room)
+ local by
+ if pen.width then local per=kept(pen);local m=per[tab_name];if not m then m={};per[tab_name]=m end;by=m[base];if not by then by={};m[base]=by end
+  local v=by[diff or false];if v then return v[1],v[2]end
+ end
+ local size,n=32,24
+ local function plain()return up(S.cut(base,n))..(diff and " · "..diff or "")end
  if pen.width then
   while size>24 and pen:width(plain(),size,F.title)>room do size=size-2 end
   while n>6 and pen:width(plain(),size,F.title)>room do n=n-1 end
  end
- local name=S.cut(base,n):upper();if diff then name=name..MUTED.." · {#reset()}"..diff end
- tx(name,80,14,room,48,size,C.value,"left",F.title);rc(24,62,752,1,C.rule,1)
- local R=75
- for i=1,3 do rc(TAB_COLS[i][1]+TAB_COLS[i][2]+20,R,1,119,C.rule,1)end
- local c=TAB_COLS[1];tx("Mission Time",c[1],R,c[2],24,20,C.label,"left",F.medium);tx(seconds and S.clock(seconds)or DASH,c[1],R+22,c[2],84,72,C.value,"left",F.title)
- local cols={{"Kill Streak",t.streak,"Mission Best",t.streak_best,GOLD},{"Downs",t.downs,"Deaths",t.deaths,VALUE},{"Kills",t.kills,"Best Here",t.kills_best and S.commas(t.kills_best),GOLD}}
- for i,e in ipairs(cols)do c=TAB_COLS[i+1]
-  tx(e[1],c[1],R,c[2],24,20,C.label,"left",F.medium);tx(num(e[2]),c[1],R+24,c[2],56,50,C.value,"left",F.title)
-  if e[4]then tx(e[3],c[1],R+84,c[2],22,17,C.muted,"left",F.medium);tx(e[5]..e[4].."{#reset()}",c[1],R+84,c[2],22,17,C.muted,"right",F.medium)end
+ local name=up(S.cut(base,n));if diff then name=name..MUTED.." · {#reset()}"..diff end
+ if by then by[diff or false]={name,size}end
+ return name,size
+end
+-- Layout A, in the Tab overlay's top right corner: the game's difficulty icon and the mission over the Tracker Panel's Kills Leads, pressed to the
+-- slot's 800 by 250. f scales it to the slot; ic holds the overlay's own difficulty icon, its space left empty when missing.
+local NO_ICONS={}
+function W.tab(pen,x,y,t,seconds,f,_,ic)
+ f=f or 1;ic=ic or NO_ICONS
+ TP,TX,TY,TF=pen,x,y,f
+ local w,h=800*f,250*f
+ box(pen,x,y,w,h,C.frame)
+ if ic.difficulty and pen.texture then pen:texture(ic.difficulty,x+24*f,y+14*f,40*f,40*f,C.value)end
+ local room=696
+ local name,size=tab_name(pen,t.mission or t.title,t.difficulty and up(t.difficulty),room)
+ tx(name,76,12,room,42,size,C.value,"left",F.title);rc(24,59,752,1,C.rule,1)
+ -- the clock, a bar toward the best clear, and the time to beat under it: gold while ahead, grey once past
+ tx("Mission Time",24,71,188,20,17,C.label)
+ tx(seconds and S.clock(seconds)or DASH,23,91,200,68,62,C.value,"left",F.title)
+ if t.best_clear then
+  rc(24,162,188,5,C.track,1);local cs=t.clock_seconds or seconds;local k=cs and math.min(1,cs/t.best_clear)or 0;if k>0 then rc(24,162,188*k,5,C.gold,2)end
+  tx("Best Clear "..GOLD..S.clock(t.best_clear).."{#reset()}",24,173,188,16,13,C.muted)
+  local fig,words,ahead=beat(t,seconds)
+  if fig then rc(24,193,188,1,C.rule,1)
+   tx(fig,24,200,188,26,24,ahead and C.gold or C.muted,"left",F.title)
+   tx(words,24,228,188,16,13,ahead and C.label or C.muted)
+  end
  end
- if cats then rc(24,204,752,1,C.rule,1)
-  for i,e in ipairs(t.cats)do tx(e[1].." "..VALUE..S.commas(e[2]).."{#reset()}",24+(i-1)*752/5,210,752/5,26,17,C.muted,i==1 and "left"or i==#t.cats and "right"or "center",F.medium)end
+ rc(228,71,1,168,C.rule,1)
+ -- Kills: the figure, its best beside it over the mix bar, and the key on one line across the right side
+ local bx,rw=242,534
+ tx("Kills",bx,71,rw,20,17,C.label)
+ local kn=num(t.kills);local kw=tw(pen,kn,42,F.title,.55)
+ tx(kn,bx,91,kw+8,46,42,C.value,"left",F.title)
+ local sx=bx+kw+18;local sw=bx+rw-sx
+ if t.kills_best then tx(kills_best(t),sx,97,sw,16,13,C.muted)end
+ local total=0;for _,e in ipairs(t.cats)do total=total+(e[2]or 0)end
+ if total>0 then local cx=sx
+  for i,e in ipairs(t.cats)do if (e[2]or 0)>0 then local cw=math.max(1,(sw-2*(#t.cats-1))*e[2]/total);rc(cx,118,cw,6,MIX[i]or C.label,2);cx=cx+cw+2 end end
+ else rc(sx,118,sw,6,C.track,1)end
+ local items=key_items(t.cats)
+ local ks=13
+ while ks>9 and key_sum(pen,ks,12,.55)+6*(#items-1)>rw do ks=ks-1 end
+ local gap=#items>1 and math.max(6,(rw-key_sum(pen,ks,12,.55))/(#items-1))or 0;local kx=bx
+ for _,it in ipairs(items)do local nw,vw=tw(pen,it[1],ks,F.medium,.55),tw(pen,it[2],ks+2,F.title,.55)
+  rc(kx,145,7,7,it[3],2);tx(it[1],kx+12,140,nw+2,16,ks,C.muted);tx(it[2],kx+12+nw+5,139,vw+4,17,ks+2,C.value,"left",F.title);kx=kx+key_iw(pen,it,ks,12,.55)+gap end
+ rc(bx,166,rw,1,C.rule,1)
+ local cx=bx
+ for i=1,3 do local cw=rw*CELL_W[i];local px=i>1 and 12 or 0;local v,best=cell(t,i);local label=CELL[i]
+  if i>1 then rc(cx,173,1,67,C.rule,1)end
+  local ls,lw=14,cw-px-10;if pen.width then while ls>11 and mw(pen,label,ls,F.medium)>lw do ls=ls-1 end end
+  tx(label,cx+px,173,lw,16,ls,C.label)
+  tx(num(v),cx+px,193,lw,30,28,C.value,"left",F.title)
+  if best then tx(best,cx+px,227,lw,15,13,C.muted)end
+  cx=cx+cw
  end
  return w,h
 end
@@ -127,32 +261,16 @@ local function cards(pen,x,y,rows)
  end
  return w,h
 end
-local function strip(pen,x,y,rows,seconds)
- local w,h=S.size("squad","strip",#rows);box(pen,x,y,w,h,C.frame)
- pen:text("Scoreboard",x+22,y+12,300,36,28,C.value,"left",F.title)
- if seconds then pen:text(S.clock(seconds),x+22,y+12,w-44,36,18,C.muted,"right",F.medium)end
- pen:rect(x+22,y+54,w-44,1,C.rule,1)
- for i,r in ipairs(rows)do local ry=y+60+(i-1)*72
-  if i>1 then pen:rect(x+22,ry,w-44,1,C.rule,1)end
-  if r.you then pen:rect(x+10,ry+8,3,58,C.gold,2)end
-  pen:text(S.cut(r.name,18).."  "..MUTED..class_line(r).."{#reset()}",x+22,ry+6,300,28,20,name_colour(r),"left",F.body)
-  pen:text(S.commas(r.damage),x+250,ry+4,w-272,30,26,gold(r,"damage"),"right",F.title)
-  bar(pen,x+22,ry+38,w-44,r.share,r.you and C.gold or C.label)
-  for j,f in ipairs(STRIP)do parts[j]=((not plain[f]and r.top[f])and GOLD or VALUE)..S.commas(r[f]).."{#reset()} "..f end
-  pen:text(table.concat(parts," · "),x+22,ry+46,w-44,22,16,C.label,"left",F.medium)
- end
- return w,h
-end
 -- Extra Stats: the Squad Table with a bar of kills by kind along each row and taller Squad Cards, laid out in the approved mockups' units from X0,Y0 and drawn at FS, the scale that fits them to their room.
 local KIND={"lesser","elites","specials","monst"}
-local KIND_NAME={lesser="Lesser",elites="Elites",specials="Specials",monst="Monstrosities"}
+local KIND_NAME={lesser="Horde",elites="Elites",specials="Specials",monst="Bosses"}
 local KIND_COL={lesser=D.rgba(127,145,114),elites=C.gold,specials=C.gold_hi,monst=C.bad}
 local INK=D.rgba(11,15,12)
 -- field, heading, right edge and width
 local BAR_COLS={{"damage","DAMAGE",455,170},{"boss","BOSS DMG",565,105},{"weak","WEAKSPOTS",680,100},{"crit","CRITS",755,75},{"kills","KILLS",835,80},{"downs","DOWNS",905,70},{"deaths","DEATHS",980,75}}
 -- a taller card's rows: label, field, top, and the mockup's smaller type for the three new rows or the indent of the kinds of kill under Kills
 local CARD_ROWS={{"Boss Dmg","boss",176,"small"},{"Weakspots Hit","weak",202,"small"},{"Critical Hits","crit",228,"small"},{"Kills","kills",262},
- {"Lesser Enemies","lesser",290,"in"},{"Elites","elites",312,"in"},{"Specials","specials",334,"in"},{"Monstrosities","monst",356,"in"},
+ {"Horde","lesser",290,"in"},{"Elites","elites",312,"in"},{"Specials","specials",334,"in"},{"Bosses","monst",356,"in"},
  {"Melee Enemies","melee",386,"in"},{"Ranged Enemies","ranged",408,"in"},{"Downs","downs",446,"half"},{"Deaths","deaths",446,"half2"}}
 -- the Support page: Revives, Saves and Time In Coherency, then Attacks Blocked and Dodged, then Blitzes and Abilities Used, Downs and Deaths kept at the foot
 local SUPPORT_ROWS={{"Revives","revives",176,"small"},{"Saves","saves",202,"small"},{"Time In Coherency","coherency",228,"small"},
@@ -162,9 +280,9 @@ local SUPPORT_COLS={{"revives","REVIVES",395,95},{"saves","SAVES",492.5,95},{"co
 -- what each figure counts, shown under the scoreboard while the cursor is over it, one sentence a line
 local TIPS={damage={"Damage","Damage dealt to enemies."},boss={"Boss Damage","Damage dealt to Monstrosities and Captains."},
  weak={"Weakspots","Hits that landed on a weakspot."},crit={"Critical Hits","Hits that were critical."},kills={"Kills","Enemies killed."},
- lesser={"Lesser Enemies","Horde enemies killed, melee and ranged."},elites={"Elites","Elites killed."},specials={"Specials","Specials killed."},
- monst={"Monstrosities","Monstrosities and Captains killed."},melee={"Melee Enemies","Lesser and elite enemies that fight up close, killed."},
- ranged={"Ranged Enemies","Lesser and elite enemies that shoot, killed."},downs={"Downs","Times knocked down."},deaths={"Deaths","Times killed."},
+ lesser={"Horde","Horde enemies killed, melee and ranged."},elites={"Elites","Elites killed."},specials={"Specials","Specials killed."},
+ monst={"Bosses","Monstrosities and Captains killed."},melee={"Melee Enemies","Horde and elite enemies that fight up close, killed."},
+ ranged={"Ranged Enemies","Horde and elite enemies that shoot, killed."},downs={"Downs","Times knocked down."},deaths={"Deaths","Times killed."},
  revives={"Revives","Downed teammates helped back up."},
  saves={"Saves","Teammates pulled up from a ledge, cut out of a net or freed after a respawn.","Killing an enemy that has a teammate pinned counts too."},
  coherency={"Time In Coherency","Time spent in coherency with at least one teammate."},blocked={"Attacks Blocked","Enemy attacks blocked."},
@@ -172,12 +290,13 @@ local TIPS={damage={"Damage","Damage dealt to enemies."},boss={"Boss Damage","Da
  blitzes={"Blitzes Used","Blitzes used.","A teammate's are worked out from their charges, so they can be slightly off."},
  abilities={"Abilities Used","Combat abilities used.","A teammate's are worked out from their charges, so they can be slightly off."}}
 local EMPTY={}
-local PEN,X0,Y0,FS=nil,0,0,1
+-- FX the scale across, which the Squad Table alone may stretch past FS to fill the room it is given, its type kept at FS
+local PEN,X0,Y0,FS,FX=nil,0,0,1,1
+local CARDS=false
 -- the cursor in screen units while it is up, and what is under it this frame: a figure's name, or "kind" with its row and kind
 local HP,HIT,HR,HK,HX,HY,HW,HH
--- figures, names and text widths are kept once worked out, so a held scoreboard makes no new strings a frame; each is let go when it grows large
-local CC,CUT,PCT,cc_n,cut_n={}, {}, {},0,0
-local function commas(n)if n==nil then return DASH end;local s=CC[n];if not s then if cc_n>600 then CC,cc_n={},0 end;s=S.commas(n);CC[n]=s;cc_n=cc_n+1 end;return s end
+-- names and text widths are kept once worked out, so a held scoreboard makes no new strings a frame; each is let go when it grows large
+local CUT,PCT,cut_n={}, {},0
 local function cut(s,n)
  if cut_n>200 then CUT,cut_n={},0 end
  local by=CUT[n];if not by then by={};CUT[n]=by end;local v=by[s];if not v then v=S.cut(s,n);by[s]=v;cut_n=cut_n+1 end;return v
@@ -196,24 +315,18 @@ function share(p,kills)
  local by=SHARE[p];if not by then by={};SHARE[p]=by end
  local k=kills or false;local s=by[k];if not s then s=kills and p.."%  ·  "..commas(kills)or p.."%";by[k]=s;share_n=share_n+1 end;return s
 end
-local function width(s,size,font)
- if not PEN.width then return #s*size*.55 end
- local all=PEN.io_widths;if not all or all.n>600 then all={n=0};PEN.io_widths=all end
- local key=PEN.k or 1;local per=all[key];if not per then per={};all[key]=per end
- font=font or F.body;local byf=per[font];if not byf then byf={};per[font]=byf end;local bys=byf[size];if not bys then bys={};byf[size]=bys end
- local v=bys[s];if not v then v=PEN:width(s,size,font);bys[s]=v;all.n=all.n+1 end;return v
-end
-local function R(ax,ay,aw,ah,c,l)PEN:rect(X0+ax*FS,Y0+ay*FS,math.max(1,aw*FS),math.max(1,ah*FS),c,l)end
+local function width(s,size,font)if not PEN.width then return #s*size*.55 end;return mw(PEN,s,size,font)end
+local function R(ax,ay,aw,ah,c,l)PEN:rect(X0+ax*FX,Y0+ay*FS,math.max(1,aw*FX),math.max(1,ah*FS),c,l)end
 -- a text too long for its box comes down in size to fit it, as the mockup's do
 local function T(s,ax,ay,aw,ah,size,c,align,font)
- local tw=width(s,size,font);if tw>aw then size=math.max(9,math.floor(2*size*aw/tw)/2)end
- PEN:text(s,X0+ax*FS,Y0+ay*FS,aw*FS,ah*FS,size*FS,c,align,font)
+ local room=aw*FX/FS;local tw=width(s,size,font);if tw>room then size=math.max(9,math.floor(2*size*room/tw)/2)end
+ PEN:text(s,X0+ax*FX,Y0+ay*FS,aw*FX,ah*FS,size*FS,c,align,font)
 end
 local function B(ax,ay,aw,k,fill)R(ax,ay,aw,5,C.track,1);if k>0 then R(ax,ay,math.max(1,aw*math.min(1,k)),5,fill,2)end end
 local function hit(ax,ay,aw,ah,key,r,k)
  if not HP then return end
- local x,y=X0+ax*FS,Y0+ay*FS
- if HP.x>=x and HP.x<x+aw*FS and HP.y>=y and HP.y<y+ah*FS then HIT,HR,HK,HX,HY,HW,HH=key,r,k,ax,ay,aw,ah end
+ local x,y=X0+ax*FX,Y0+ay*FS
+ if HP.x>=x and HP.x<x+aw*FX and HP.y>=y and HP.y<y+ah*FS then HIT,HR,HK,HX,HY,HW,HH=key,r,k,ax,ay,aw,ah end
 end
 -- the table's row: the rule above, the player's own tinted with its gold edge, name and class, then the damage with its share and the other figures
 local function row_start(r,ry,w)
@@ -285,7 +398,7 @@ end
 -- Squad Table: Damage, Boss Dmg, Weakspots, Crits, Kills, Downs and Deaths, the kinds bar along each row and the key under them
 local function table_extra(rows,page)
  local n=#rows;local w,h=S.size("squad","table",n,nil,true);local support=page=="support"
- box(PEN,X0,Y0,w*FS,h*FS,C.frame)
+ box(PEN,X0,Y0,w*FX,h*FS,C.frame)
  T("PLAYER",30,8,200,22,15,C.muted,"left",F.body);T(support and "SUPPORT"or "COMBAT",110,8,120,22,15,C.gold_hi,"left",F.body)
  for _,c in ipairs(support and SUPPORT_COLS or BAR_COLS)do T(c[2],c[3]-c[4],8,c[4],22,15,C.muted,"right",F.body);hit(c[3]-c[4],8,c[4],22,c[1])end
  if support then for i,r in ipairs(rows)do support_row(r,52+(i-1)*84,w)end;return w,h end
@@ -332,13 +445,30 @@ local function wrap(lines,room)
  end
  WRAP[lines]=out;return out
 end
+-- a row's own lines, kept on the row for the next frame; the model makes new rows when its figures change
+local BUILT=setmetatable({},{__mode="k"})
 -- what the figure under the cursor counts, lit where it is and told in a box just under the scoreboard, or over it where there is no room under
 local function caption(bw,bh)
  local lines=TIPS[HIT]
+ local per=HR and BUILT[HR];if per and HIT=="kind"then per=per.kind end;local key=HIT=="kind"and HK or HIT
+ if per and key and per[key]then lines=per[key]else
+ local falls=HR and HR.falls or EMPTY
+ if HIT=="downs"or HIT=="deaths"then local list={}
+  for _,e in ipairs(falls)do local died=e.outcome~="down"
+   if HIT=="downs"and e.outcome~="direct_death"or HIT=="deaths"and died then local t=HIT=="deaths"and e.died_t or e.t
+    list[#list+1]=(t and S.clock(t).." "or "")..(e.what or "Unknown cause")..(HIT=="downs"and e.outcome=="down_to_death"and ", then died"or "")end end
+  if #list>0 then lines={TIPS[HIT][1],unpack(list)}elseif CARDS then lines=nil end
+ elseif HIT=="revives"then local list={}
+  for _,q in ipairs(HR and HR.lifted or EMPTY)do list[#list+1]=q.name..(q.n>1 and " x"..q.n or "")end
+  if #list>0 then lines={"Revived",unpack(list)}elseif CARDS then lines=nil end
+ end
  if HIT=="coherency"and HR and HR.coherency_share and HR.tracked then
   lines={"Time In Coherency","The share of their time alive in the mission spent in coherency with at least one teammate.",S.clock(HR.coherency or 0).." of "..S.clock(HR.tracked).."."}
  elseif HIT=="kind"then local d=HR.kind_damage;local sum=0;for _,k in ipairs(KIND)do sum=sum+(d[k]or 0)end
   lines={TIPS[HK]and TIPS[HK][1]or KIND_NAME[HK],math.floor(100*(d[HK]or 0)/math.max(sum,1e-9)+.5).."% of their damage.",commas(HR[HK]or 0).." killed."}end
+ if HR and key and lines and lines~=TIPS[HIT]then local all=BUILT[HR]or {};BUILT[HR]=all;if HIT=="kind"then all.kind=all.kind or {};all=all.kind end;all[key]=lines end
+ end
+ if CARDS and HIT~="downs"and HIT~="deaths"and HIT~="revives"then lines=nil end
  if not lines then return end
  R(HX,HY,HW,HH,C.label_tint,1)
  local cw=math.max(bw,380);local out=wrap(lines,cw-28);local ch=46+#out*22
@@ -348,16 +478,54 @@ local function caption(bw,bh)
  PEN:text(lines[1],x+14,y+8,cw-28,26,18,C.gold,"left",F.title)
  for i,l in ipairs(out)do PEN:text(l,x+14,y+34+(i-1)*22,cw-28,22,16,C.label,"left",F.medium)end
 end
--- extra says Extra Stats is on, f the scale its layouts are drawn at, page "support" for the Support page and hover the cursor, {x,y,sw,sh} in
--- screen units, while it is up; the Strip has no extra figures and no pages
-function W.squad(pen,layout,x,y,rows,seconds,extra,f,page,hover)
- if extra and (layout=="table"or layout=="cards")then
-  PEN,X0,Y0,FS,HP,HIT=pen,x,y,f or 1,hover,nil
-  local w,h=(layout=="table"and table_extra or cards_extra)(rows,page)
-  if HIT then caption(w*FS,h*FS)end;HP,HR=nil,nil
-  return w*FS,h*FS
+-- the Strip: a row each, its name and class, its headline figure over a bar and a line of figures under it; Combat leads with damage and its
+-- share of the squad's, Support with time in coherency. Each figure on the line is its own text, so it can be hovered, and a line too long
+-- for the row comes down in size to fit it.
+local function strip(rows,seconds,page)
+ local w,h=S.size("squad","strip",#rows);local support=page=="support"
+ box(PEN,X0,Y0,w*FS,h*FS,C.frame)
+ T("Scoreboard",22,12,300,36,28,C.value,"left",F.title)
+ local right=w-22
+ if seconds then local c=S.clock(seconds);T(c,22,12,w-44,36,18,C.muted,"right",F.medium);right=right-width(c,18,F.medium)-16 end
+ if page then T(support and "SUPPORT"or "COMBAT",right-140,12,140,36,15,C.gold_hi,"right",F.body)end
+ R(22,54,w-44,1,C.rule,1)
+ local list=support and STRIP_SUPPORT or STRIP;local gap=width(" · ",16,F.medium)
+ for i,r in ipairs(rows)do local ry=60+(i-1)*72
+  if i>1 then R(22,ry,w-44,1,C.rule,1)end
+  if r.you then R(10,ry+8,3,58,C.gold,2)end
+  PEN:text(cut(r.name,18).."  "..MUTED..class_line(r).."{#reset()}",X0+22*FS,Y0+(ry+6)*FS,300*FS,28*FS,20*FS,name_colour(r),"left",F.body)
+  local f,big,k="damage",commas(r.damage),r.share or 0
+  if support then f,big,k="coherency",fig(r,"coherency"),r.coherency_share or 0
+   T("In Coherency",250,ry+11,w-282-width(big,26,F.title),22,15,C.muted,"right",F.medium)end
+  T(big,250,ry+4,w-272,30,26,gold(r,f),"right",F.title);hit(250,ry+2,w-272,34,f,r)
+  B(22,ry+38,w-44,k,r.you and C.gold or C.label)
+  local total=0
+  for j,e in ipairs(list)do local v=r[e[1]];total=total+(j>1 and gap or 0)+width(commas(v),16,F.medium)+5+width(v==1 and e[2]or e[3],16,F.medium)end
+  local s=math.min(1,(w-44)/math.max(1,total));local px=22
+  for j,e in ipairs(list)do local v=r[e[1]];local vs,ls=commas(v),v==1 and e[2]or e[3]
+   if j>1 then T(" · ",px,ry+46,gap*s+2,22,16*s,C.label,"left",F.medium);px=px+gap*s end
+   local vw,lw=width(vs,16,F.medium)*s,width(ls,16,F.medium)*s
+   T(vs,px,ry+46,vw+2,22,16*s,(not plain[e[1]]and r.top[e[1]])and C.gold or C.value,"left",F.medium)
+   T(ls,px+vw+5*s,ry+46,lw+2,22,16*s,C.label,"left",F.medium);hit(px,ry+44,vw+5*s+lw,24,e[1],r)
+   px=px+vw+5*s+lw
+  end
  end
- if layout=="table"then return table_rows(pen,x,y,rows)elseif layout=="strip"then return strip(pen,x,y,rows,seconds)end
+ return w,h
+end
+-- extra says Extra Stats is on, f the scale its layouts are drawn at, page "support" for the Support page and hover the cursor, {x,y,sw,sh} in
+-- screen units, while it is up; the Strip has no extra figures, but has both pages. wide, for the Squad Table with Extra Stats, is how wide
+-- it may run: shrunk to fit its height it keeps that scale up and down and stretches across to wide
+function W.squad(pen,layout,x,y,rows,seconds,extra,f,page,hover,wide)
+ if layout=="strip"or extra and (layout=="table"or layout=="cards")then
+  -- the Squad Cards caption only Downs, Deaths and Revives, with what the card cannot say: when and what, and who
+  PEN,X0,Y0,FS,HP,HIT=pen,x,y,f or 1,hover,nil;FX=FS;CARDS=layout=="cards"
+  if layout=="table"and wide then FX=math.max(FS,wide/S.size("squad","table",#rows,nil,true))end
+  local w,h
+  if layout=="strip"then w,h=strip(rows,seconds,page)else w,h=(layout=="table"and table_extra or cards_extra)(rows,page)end
+  if HIT then caption(w*FX,h*FS)end;HP,HR=nil,nil
+  local dw=w*FX;FX=FS;return dw,h*FS
+ end
+ if layout=="table"then return table_rows(pen,x,y,rows)end
  return cards(pen,x,y,rows)
 end
 return W

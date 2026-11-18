@@ -25,7 +25,7 @@ function B.reset(storage,R,H,state,now)
  store(storage,state);prepare(storage);if not storage:flush()then return nil,"Your statistics could not be saved, so nothing was reset."end
  local seq={};for _,k in ipairs({"lifetime","solo","logs"})do seq[k]=math.max(state[k]and state[k].run_sequence or 0,B.floor(storage,k))end
  local out={lifetime=R.new(),solo=R.new(),logs=R.new()}
- for k,n in pairs(seq)do out[k].data.run_sequence=n end
+ for k,n in pairs(seq)do out[k].data.run_sequence=n;out[k].data.counted_entries=3 end
  local life=out.lifetime.data;life.history_policy_revision=(state.lifetime.history_policy_revision or 0)+1
  -- Tracked Players are a setting, so they stay with the names given them, and the new revision has friend stats follow.
  life.friend_tracking=H.clone(state.lifetime.friend_tracking);life.friend_tracking_revision=(state.lifetime.friend_tracking_revision or 0)+1

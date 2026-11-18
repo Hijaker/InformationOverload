@@ -57,7 +57,9 @@ function D.finalize(m,at)
  if m.all_departures then local absent={};for _,e in ipairs(m.all_departures)do e.seconds_before_end=m.ended_wall and e.wall_at and math.max(0,m.ended_wall-e.wall_at)or at and math.max(0,at-e.at)or e.seconds_before_end;if not e.returned and (e.personal or e.seconds_before_end and e.seconds_before_end>D.end_window)then absent[e.player]=true end end
   m.players_left=0;for _ in pairs(absent)do m.players_left=m.players_left+1 end
   m.context.departure_summary={};for _,e in ipairs(m.all_departures)do m.context.departure_summary[e.player]={returned=e.returned==true,seconds_before_end=e.seconds_before_end}end
-  for id,row in pairs(m.context.operative_roster or {})do row.left=absent[row.account_id or id]==true end
+  -- a character swapped away from has left, though its account is still here on another
+  local here={};for id,row in pairs(m.context.operative_roster or {})do if row.present then here[row.account_id or id]=true end end
+  for id,row in pairs(m.context.operative_roster or {})do row.left=absent[row.account_id or id]==true or row.present==false and here[row.account_id or id]==true end
  end
  local function add(list,e)local key=e.player;local row=list[key]or {name=e.name,class=e.class,personal=e.personal,count=0};list[key]=row;row.count=row.count+1;row.steam_id=e.steam_id;row.steam_name=e.steam_name;if e.eligible then row.tally_count=(row.tally_count or 0)+1 end end
  for _,e in ipairs(m.departure_events or {})do

@@ -4,15 +4,35 @@ return function(mod,api,C,deps)
     local local_unit,extension,breed=deps.local_unit,deps.extension,deps.breed
     local enemy_display,is_enemy,live_context=deps.enemy_display,deps.is_enemy,deps.context
     local Measurements,invoke,contained=deps.Experimental,deps.invoke,deps.contained
+    local WeaponExplosions=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/weapon_explosions")
     local scope,processing_explosions
     local special_queues={}
     local action_ids=setmetatable({},{__mode="k"})
     local function new_attack(action, category)
         local c = live_context(action, category)
         if not c then return end
+        local template=action._weapon_template
+        -- a blitz or ability wielded as a weapon (missile launcher, transonic claw) is not the loadout's melee or ranged
+        local wielded=action._wielded_slot
+        if template and not c.grenade and (wielded==nil or wielded=="slot_primary" or wielded=="slot_secondary") then
+            c.weapon_slot=deps.PartyWeapon.slot(template)
+            if c.weapon_slot then
+                local component=action._weapon_action_component
+                local settings=action._action_settings or {}
+                local powered=component and component.special_active_at_start
+                    and (category=="melee" or settings.fire_special_configuration~=nil)
+                c.weapon_special=deps.PartyWeapon.action_special(template,settings,c.weapon_slot,category)
+                    or powered==true
+            end
+        end
+        local explosion_profiles=category=="ranged" and WeaponExplosions.profiles(template)
+        if type(explosion_profiles)=="table" and next(explosion_profiles) then c.explosive=true;c.hitscan_explosive=true end
+        -- measured before it is queued, so a fault here leaves no queued attack that never resolves
+        local measurement=Measurements.attack(action,category)
         local id = api.tracker():begin_attack(c)
-        C.attacks[id] = {action=action,id = id, context = c, measurement=Measurements.attack(action,category), start = C.clock, remaining = 0, closed = false}
+        C.attacks[id] = {action=action,id = id, context = c, measurement=measurement, start = C.clock, remaining = 0, closed = false}
 
+        C.attacks[id].hitscan_explosions=type(explosion_profiles)=="table" and next(explosion_profiles) and explosion_profiles or nil
         return id
     end
     local function close_attack(id)
@@ -131,8 +151,8 @@ return function(mod,api,C,deps)
             if a then a.destroyed_at=C.clock; end
         end)
     end)
-    -- The engine queues empowered melee bursts after the sweep callback.
-    -- Associate queue entries with that swing, including every affected target.
+    -- Queued blasts from empowered melee and explosive hitscan firing keep
+    -- their originating attack, including every affected target.
     mod:hook("WeaponSystem", "prepare_queued_explosion", function(func, system, ...)
         local index, data = func(system, ...)
         invoke(function()
@@ -144,7 +164,7 @@ return function(mod,api,C,deps)
                 scope=id
             end
             local a=id and C.attacks[id]
-            if a and a.context.category=="melee" then
+            if a and (a.context.category=="melee" or a.hitscan_explosions) then
                 special_queues[data]={id=id,index=index,system=system}
                 a.queues=(a.queues or 0)+1
             end
@@ -177,7 +197,8 @@ return function(mod,api,C,deps)
             local t=data.explosion_template
             if q.system==processing_explosions and t and data.attacking_unit==local_unit()
                 and data.source_position_x==x and data.source_position_y==y and data.source_position_z==z
-                and (t.damage_profile==profile or t.close_damage_profile==profile) then
+                and (t.damage_profile==profile or t.close_damage_profile==profile)
+                and (not C.attacks[q.id] or not C.attacks[q.id].hitscan_explosions or C.attacks[q.id].hitscan_explosions[profile.name]) then
                 for i=data[0],data.num_hit_units do
                     if data[(i-1)*2+1]==target then
                         if match and match~=q.id then return end
@@ -194,7 +215,9 @@ return function(mod,api,C,deps)
         local attack_id = special_id or projectile_id or scope
         if not attack_id then return end
         local category = args.attack_type
-        if category ~= "melee" and category ~= "ranged" and not ((projectile_id or special_id) and category=="explosion") then return end
+        local scoped=type(scope)=="number" and C.attacks[scope]
+        local hitscan_id=scoped and scoped.hitscan_explosions and scoped.hitscan_explosions[profile.name] and scope
+        if category ~= "melee" and category ~= "ranged" and not ((projectile_id or special_id or hitscan_id) and category=="explosion") then return end
         if not projectile_id and args.attacking_unit ~= local_unit() then return end
         local enemy, b = is_enemy(target)
         if not enemy then return end -- barrels/props/friendly fire never count
@@ -247,7 +270,34 @@ return function(mod,api,C,deps)
     local dot_profiles={bleeding="bleed",burning="burn",phosphor_burning="burn",warpfire="soulblaze",
         toxin_variant_1="toxin",toxin_variant_2="toxin",toxin_variant_3="toxin"}
     local dot_snapshot
+    -- What of yours last set each enemy alight, as one burn takes stacks from every fire and its ticks do not say which lit it: the
+    -- Flamer's own hits keep it the Flamer's while their burn lasts, until an Immolation Grenade, an explosion or an
+    -- incendiary round of yours lights it after them.
+    local FLAMER={default_flamer_assault=true,default_flamer_assault_burst=true}
+    -- each damage profile's kind of fire, worked out once: this runs on every attack report
+    local fire=setmetatable({},{__index=function(t,name)
+        local v=FLAMER[name]and "flamer"or not dot_profiles[name]and (name=="fire_grenade_impact"or name:find("incendiary",1,true)or name:find("phosphor",1,true))and "other"or false
+        t[name]=v;return v end})
+    local lit=setmetatable({},{__mode="k"})
+    -- the Flamer in hand stacks its burn on a target once an application interval, up to its own cap, as the game's flamer action does;
+    -- what was last read stands when it cannot be read, and at first the fastest interval and the most stacks any Flamer has
+    local flamer_cap,flamer_rate=20,0.25
+    local function flamer_stats()
+        local ok,t=pcall(function()local w=extension(local_unit(),"weapon_system");return w and w:burninating_template()end)
+        if ok and type(t)=="table"then local n,r=tonumber(t.max_stacks),tonumber(t.stack_application_rate)
+            if n and n>0 then flamer_cap=math.ceil(n)end;if r and r>0 then flamer_rate=r end end
+    end
+    -- the burn runs 4 s past the last stack, then sheds a stack each half second
+    local function flamer_stacks(l)return l.flamer and math.max(0,l.stacks-math.max(0,math.floor((C.clock-l.flamer-4.5)/0.5)))or 0 end
+    local function flamer_hit(l)local left=flamer_stacks(l)
+        if l.stacked and C.clock-l.stacked<flamer_rate-1e-6 then l.stacks=left else flamer_stats();l.stacks=math.min(flamer_cap,left+1);l.stacked=C.clock end
+    end
+    local function by_flamer(target)local l=lit[target];return l~=nil and flamer_stacks(l)>0 and not (l.other and l.other>=l.flamer)end
     local function dot_report(profile,target,attacker,damage,result,attack_type)
+        local name=profile and profile.name
+        if name and target then local f=fire[name]or attack_type=="explosion"and "other"
+            if f and attacker==local_unit()then local l=lit[target]or {};lit[target]=l;if f=="flamer"then flamer_hit(l)end;l[f]=C.clock end
+        end
         local kind=profile and dot_profiles[profile.name]
         if not kind or attack_type~="buff" or attacker~=local_unit() or not api.enabled() then return end
         if type(damage)~="number" or damage<=0 then return true end
@@ -262,7 +312,7 @@ return function(mod,api,C,deps)
         -- Fatal remote ticks lack reliable pre-health; leave their split unknown.
         local health=snapshot and snapshot.general_health
         if not health and result=="damaged" then health=damage end
-        api.tracker():run_damage_hit({category="dot"},{damage=damage,health_before=health,armour=armour,dot_type=kind})
+        api.tracker():run_damage_hit({category="dot"},{damage=damage,health_before=health,armour=armour,dot_type=kind,flamer=name=="burning"and by_flamer(target)or nil})
 
         return true
     end
@@ -327,7 +377,7 @@ return function(mod,api,C,deps)
                 api.tracker():hit(e.id, {is_explosion=e.category=="explosion",calculated_damage=e.general_damage,health_before=e.general_health,event_id = C.event_id, origin = "player_attack", damage = damage, target_id = tostring(e.target),
                     killed = result == "died", headshot = e.headshot, cleave=e.cleave, armour=e.armour,enemy=enemy_display(breed(e.target),e.target),
                     boss_id = e.boss_max and tostring(e.target) or nil, boss_max_health = e.boss_max})
-                return
+                return a.context,e.armour,e.general_damage,e.general_health
             end
         end
         local candidates={}
@@ -355,7 +405,7 @@ return function(mod,api,C,deps)
                 armour=armour,enemy=enemy_display(b,target), killed=result=="died",headshot=attack_type~="explosion" and weakspot and not tags.monster and not tags.captain,
                 boss_id=(b.is_boss or tags.monster or tags.captain) and tostring(target) or nil,
                 boss_max_health=health and health:max_health() or nil})
-            ;return
+            return a.context,armour
         end
 
     end

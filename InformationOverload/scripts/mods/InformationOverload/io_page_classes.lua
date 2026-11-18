@@ -5,10 +5,10 @@ local D=mod:io_dofile(base.."io_view_definitions")
 local Overview=mod:io_dofile(base.."io_overview")
 local K=mod:io_dofile(base.."io_data_career")
 local X=mod:io_dofile(base.."io_class_tabs")
+local RD=mod:io_dofile(base.."io_records_damage")
 local C,DASH,commas=D.c,K.dash,Overview.commas
 local TABS={{"overview","Overview"},{"damage","Damage"},{"streaks","Streaks"}}
 local MORE={{"blitz","Blitz",2},{"pbb","PBB"},{"blo","BLO"},{"cw","Crystalline Will"}}
-local DETAILS={{"overall","Overall"},{"armour","By Armour"},{"enemy","By Enemy"},{"weapon","By Weapon"}}
 local L,R,W=D.left,D.col2,D.col
 local function linked(view,list)local out={};for _,r in ipairs(list)do out[#out+1]={r[1],r[2],fn=r.run and K.open_run(view,r.run)or nil}end;return out end
 local function chart(view,cv,y,name,mode,bars)
@@ -44,37 +44,13 @@ local function overview(view,cv,tracker,cls,name)
  place(nil,"Hyper-Critical",nil,m.hyper)
  place(nil,"Perils Of The Warp",nil,m.perils)
 end
+-- the Damage tab: the Records page's cards for this one class, its three biggest hits side by side with their best against each armour
 local function damage(view,cv,popup,tracker,cls)
- local m=K.class_damage(tracker,view.scope,cls)
- local has={overall=true,armour=#m.armour>0,enemy=#m.enemy>0,weapon=#m.weapon>0};local opts={}
- for _,d in ipairs(DETAILS)do if has[d[1]]then opts[#opts+1]={value=d[1],label=d[2]}end end
- local det=has[view.io_cls_det or ""]and view.io_cls_det or "overall";local label="Overall";for _,o in ipairs(opts)do if o.value==det then label=o.label end end
+ local rows=RD.rows_of(tracker,view.scope,cls);local dets=RD.details(rows,cls);local opts={}
+ for _,d in ipairs(dets)do opts[#opts+1]={value=d[1],label=d[2]}end
+ local det,label="overall","Overall";for _,d in ipairs(dets)do if d[1]==view.io_cls_det then det,label=d[1],d[2]end end
  K.dropdown(view,cv,popup,"io_cdet",D.right-280,D.row2,280,"Detail:",label,det,opts,function(v)view.io_cls_det=v;if view.scroll then view.scroll[view.page]=0 end end)
- view:_sheet(cv,D.sheet);local y=D.sheet
- local function fmt(r)return r and commas(r.value)or DASH end
- if det=="overall"then
-  for _,k in ipairs(K.kinds)do local r=m.overall[k[1]]
-   if r then local rows={{"Damage",commas(r.value),big=true},{"Class",Overview.class_names[r.class]or DASH}}
-    if r.weapon then rows[#rows+1]={"Weapon",K.weapon(r.weapon)}end;if r.enemy then rows[#rows+1]={"Enemy",tostring(r.enemy)}end
-    y=y+K.card(view,cv,D.left,y,D.width,k[2],nil,rows,r.run and K.open_run(view,r.run)or nil)+10
-   end
-  end
-  if y==D.sheet then view:_card(cv,D.left,y,D.width,92,"No Damage Records Yet")end
- elseif det=="armour"then
-  local rows={};for _,a in ipairs(m.armour)do rows[#rows+1]={a.label,fmt(a.rec.single_hit),fmt(a.rec.melee_cleave),fmt(a.rec.explosive_hit)}end
-  K.table(view,cv,D.left,y,D.width,{{"Armour"},{K.kinds[1][2],760},{K.kinds[2][2],1020},{K.kinds[3][2],D.right-10}},rows)
- elseif det=="enemy"then
-  local rows,last={},nil
-  for _,e in ipairs(m.enemy)do if e.group~=last then rows[#rows+1]={grp=e.group};last=e.group end;local h=e.hit
-   rows[#rows+1]={e.label,commas(h.damage),Overview.class_names[h.class]or DASH,h.weapon and K.weapon(h.weapon)or DASH,fn=h.run_id and K.open_run(view,h.run_id)or nil}end
-  K.table(view,cv,D.left,y,D.width,{{"Enemy"},{"Biggest Hit",680},{"Class",720,"left",150},{"Weapon",890,"left",D.right-900}},rows)
- else
-  local rows,last={},nil
-  for _,w in ipairs(m.weapon)do local cat=w.cat=="melee"and "Melee"or w.cat=="ranged"and "Ranged"or "Other";if cat~=last then rows[#rows+1]={grp=cat};last=cat end
-   rows[#rows+1]={K.fit(view,w.label,16,480),fmt(w.rec.single_hit),fmt(w.rec.melee_cleave),fmt(w.rec.explosive_hit)}end
-  K.table(view,cv,D.left,y,D.width,{{"Weapon"},{K.kinds[1][2],760},{K.kinds[2][2],1020},{K.kinds[3][2],D.right-10}},rows)
- end
- view:_sheet_end(cv)
+ view:_sheet(cv,D.sheet);RD.cards(view,cv,tracker,rows,det,cls,D.sheet);view:_sheet_end(cv)
 end
 -- the extra tabs' figures, kept until the model is rebuilt or the scope or class changes
 local function extras(view,tracker,cls)

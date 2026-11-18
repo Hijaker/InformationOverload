@@ -30,12 +30,11 @@ function M.merge(first,last)
  out.completion_markers=next(marks)and marks or nil
  if M.timeline_merge then out.combat_timeline=copy(M.timeline_merge(first.combat_timeline,last.combat_timeline))end
  if M.measurements_merge then out.measurements=M.measurements_merge(first.measurements,last.measurements)end
- if M.experimental_merge then out.experimental=M.experimental_merge(first.experimental,last.experimental)end
  out.merged_segment_ids=append(first.merged_segment_ids or {first.id},last.merged_segment_ids or {last.id})
  if (first.context and first.context.detail_capture or {}).friendly_fire_sources~=1 or (last.context and last.context.detail_capture or {}).friendly_fire_sources~=1 then
   if out.context.detail_capture then out.context.detail_capture.friendly_fire_sources=nil end
  end
- for _,field in ipairs({"damage","incidents","friendly_fire_pairs","pickup_pairs","hyper_critical","haymaker","class_events","boss_kills","boss_operatives","enemy_lethality","operative_clutches","clutches","field_improvisation","leave_abuse","failed_leave_abuse"})do if first[field]or last[field]then out[field]=counts(first[field],last[field])end end
+ for _,field in ipairs({"damage","incidents","friendly_fire_pairs","pickup_pairs","pickup_states","hyper_critical","haymaker","class_events","boss_kills","boss_operatives","enemy_lethality","operative_clutches","clutches","field_improvisation","leave_abuse","failed_leave_abuse"})do if first[field]or last[field]then out[field]=counts(first[field],last[field])end end
  -- the order teammates reached their counts in runs on across the rejoin rather than being added up
  local function reached(a,b,people)
   local top=0;for _,p in pairs(a or {})do if type(p)=="table"and type(p.reached)=="table"then for _,v in pairs(p.reached)do if type(v)=="number"and v>top then top=v end end end end
@@ -54,8 +53,12 @@ function M.merge(first,last)
   -- weakspots and crits are whole only when each part that dealt damage counted them
   out.team_damage.hit_counts=(not first.team_damage or first.team_damage.hit_counts)and (not last.team_damage or last.team_damage.hit_counts)or nil
   out.team_damage.kinds=(not first.team_damage or first.team_damage.kinds)and (not last.team_damage or last.team_damage.kinds)or nil
+  -- the mission clock's minutes are joined by team_damage.lua, and left out without it
+  out.team_damage.minutes=M.minutes_merge and M.minutes_merge(first.team_damage,last.team_damage)or nil
  end
- for _,field in ipairs({"barrel_pops","lethality_events","departure_events","all_departures"})do if first[field]or last[field]then out[field]=append(first[field],last[field])end end
+ for _,field in ipairs({"barrel_pops","lethality_events","departure_events","all_departures"})do if first[field]or last[field]then
+  local a,b=first[field],last[field];if field=="barrel_pops"and M.barrel_events then a,b=M.barrel_events(a),M.barrel_events(b)end;out[field]=append(a,b)
+ end end
  -- The player's own leave in the first part ends in this rejoin, so it is not a departure.
  local own=0;for i=1,#(first.all_departures or {})do local e=out.all_departures[i];if e.personal and not e.returned then e.returned=true;own=1 end end
  out.kill_categories=counts(first.kill_categories,last.kill_categories);out.support=(first.support or last.support)and counts(first.support,last.support)or nil;out.kills=(first.kills or 0)+(last.kills or 0);out.players_left=math.max(0,(first.players_left or 0)-own)+(last.players_left or 0)
@@ -75,7 +78,9 @@ function M.merge(first,last)
   local function part(c,field)if not c then return nil end;if M.entries and (field=="best"or field=="armour")then return M.entries(c,field)end;return c[field]end
   out.contributions={version=1};for _,field in ipairs({"best","armour","blo_contexts","increments","kill_segments"})do out.contributions[field]=append(part(first.contributions,field),part(last.contributions,field))end
  end
- for _,field in ipairs({"operative_roster","operative_identities","operative_loadouts","teammates"})do local values=copy(first.context and first.context[field]or {});for k,v in pairs(last.context and last.context[field]or {})do values[k]=copy(v)end;if next(values)then out.context[field]=values end end
+ -- a saved part keeps the squad's builds in its file
+ local function field_of(run,field)local mt=getmetatable(run);if field=="operative_loadouts"and mt and mt.io_loadouts then return mt.io_loadouts(run)end;return run.context and run.context[field]end
+ for _,field in ipairs({"operative_roster","operative_identities","operative_loadouts","teammates"})do local values=copy(field_of(first,field)or {});for k,v in pairs(field_of(last,field)or {})do values[k]=copy(v)end;if next(values)then out.context[field]=values end end
  if first.performance or last.performance then
   out.performance=counts(first.performance,last.performance)
   for k,v in pairs(out.performance)do if type(v)=="number"and (k:find("max",1,true)or k:find("peak",1,true))then out.performance[k]=math.max(first.performance and first.performance[k]or 0,last.performance and last.performance[k]or 0)end end

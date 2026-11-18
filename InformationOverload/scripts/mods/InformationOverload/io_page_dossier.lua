@@ -146,8 +146,12 @@ end
 return function(view,cv,popup)
  local tracker=view:_tracker()
  if not tracker then view:_card(cv,D.left,D.row2,D.width,92,"No Missions Recorded Yet");return end
- -- kept until the history or the Overview model is replaced; that model is built again when the runs, a display option or a mission's time change
- local dc=view.io_doss;if not dc or dc.d~=tracker.data or dc.m~=view.model then dc={d=tracker.data,m=view.model,data=P.dossier(tracker)};view.io_doss=dc end
+ -- kept across panel opens until the history is replaced or the runs, the boss timing option or a mission's time change, and in one panel until its Overview model is built again
+ local d=tracker.data or {};local dcs=mod.io_doss or setmetatable({},{__mode="k"});mod.io_doss=dcs
+ local key=table.concat({tostring(d.run_sequence),tostring(d.history_policy_revision),tostring(d.friend_tracking_revision),tostring(mod.io_times_revision),tostring((mod.io_display_options and mod.io_display_options()or {}).boss_map_timing)},"|")
+ local dc=dcs[d];if view.io_dheld and (view.io_doss~=dc or view.io_doss_m~=view.model)then dc=nil end
+ if not dc or dc.key~=key then dc={key=key,data=P.dossier(tracker)};dcs[d]=dc end
+ view.io_doss=dc;view.io_doss_m=view.model;view.io_dheld=true
  local data=dc.data
  if #data.chars==0 then view:_card(cv,D.left,D.top,D.width,92,"No Missions Recorded Yet");view.io_crumbs={{"Dossier"}};return end
  view.io_dossier_map=function(run)return tracker:run_mission_name(run.context)end

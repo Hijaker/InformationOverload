@@ -34,11 +34,11 @@ function H.lines(run,id)
  end
  return {}
 end
-function H.summary(tracker,patch)
+function H.summary(tracker,patch,mode)
  local out={games=0,total=0,highest=0}
  for _,run in ipairs(tracker.data.run_history or {})do
   local c=run.context or {};local row=run.hyper_critical and run.hyper_critical[tostring(c.character)]
-  if c.class=="broker"and (not patch or c.patch==patch)and not run.data_only and not run.hidden_contributions and not c.training_history_test and c.difficulty~="psykhanium"and type(run.victory)=="boolean"and row and row.selected then
+  if c.class=="broker"and (not patch or c.patch==patch)and (not mode or c.mode==mode)and not run.stats_excluded and not run.data_only and not run.hidden_contributions and not c.training_history_test and c.difficulty~="psykhanium"and type(run.victory)=="boolean"and row and row.selected then
    out.games=out.games+1;out.total=out.total+(row.kills or 0);out.highest=math.max(out.highest,row.kills or 0)
   end
  end

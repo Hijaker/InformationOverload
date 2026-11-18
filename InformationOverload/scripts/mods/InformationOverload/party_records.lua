@@ -4,31 +4,42 @@ local function copy(v)if type(v)~="table"then return v end;local t={};for k,x in
 local function member(data,id,class,personal)
  local p=data.members[id];if not p then p={class=class,personal=personal,kills={total=0,boss=0,elite=0,special=0,horde_melee=0,horde_ranged=0},best={}};data.members[id]=p end;p.class=class or p.class;p.personal=personal==true or p.personal==true;return p
 end
--- A saved match keeps each operative's kills by enemy as rows {enemy, subgroup, group, count, label}, false standing in for a part
--- not known; the mission under way keeps them by key, as kills add to them.
+-- A saved match keeps its enemies once, as {enemy, subgroup, group, label}, and each operative's kills by enemy as rows {enemy, count}
+-- under by_enemy, a name older builds never read, so they find no kills by enemy rather than kills read wrong. Older saves, and a match
+-- the next part of its mission may yet join, keep rows {enemy, subgroup, group, count, label}, as an older build joins them. false
+-- stands in for a part not known; the mission under way keeps them by key, as kills add to them.
 local function known(v)if v==false then return nil end;return v end
 local function key_of(k)return tostring(k.enemy)..":"..tostring(k.subgroup or k.group)end
-function P.pack_counts(counts)
+function P.pack_counts(counts,joinable)
  if type(counts)~="table"or type(counts.members)~="table"then return counts end
- local out={members={}}
- for id,p in pairs(counts.members)do
-  if p.rows and not p.enemy_kills then out.members[id]={personal=p.personal,rows=p.rows}
-  else local rows={}
-   for key,k in pairs(p.enemy_kills or {})do rows[#rows+1]={k.enemy or false,k.subgroup or false,k.group or false,k.count or 0,k.label or false,key=key}end
+ local out,all,names={members={}},{},{}
+ for id,p in pairs(counts.members)do local rows={}
+  if joinable and p.rows and not p.enemy_kills and not p.by_enemy then rows=p.rows
+  else
+   for key,k in pairs(p.enemy_kills or P.kills(p,counts))do
+    if joinable then rows[#rows+1]={k.enemy or false,k.subgroup or false,k.group or false,k.count or 0,k.label or false,key=key}
+    else local e={k.enemy or false,k.subgroup or false,k.group or false,k.label or false};local name=table.concat({tostring(e[1]),tostring(e[2]),tostring(e[3]),tostring(e[4])},"\0")
+     if not all[name]then all[name]=e;names[#names+1]=name end;rows[#rows+1]={name,k.count or 0,key=key}end
+   end
    table.sort(rows,function(a,b)return a.key<b.key end);for _,r in ipairs(rows)do r.key=nil end
-   out.members[id]={personal=p.personal,rows=rows}
   end
+  out.members[id]=joinable and {personal=p.personal,rows=rows}or {personal=p.personal,by_enemy=rows}
  end
+ table.sort(names);local index={};if names[1]then out.enemies={}end;for i,name in ipairs(names)do index[name]=i;out.enemies[i]=all[name]end
+ if not joinable then for _,p in pairs(out.members)do for _,r in ipairs(p.by_enemy)do r[1]=index[r[1]]end end end
  return out
 end
--- an operative's kills by enemy, keyed as the mission keeps them, from either shape
-function P.kills(p)
+-- an operative's kills by enemy, keyed as the mission keeps them, from either shape; counts is the table holding the operative
+function P.kills(p,counts)
  if type(p)~="table"then return {}end
  if p.enemy_kills then return p.enemy_kills end
- local out={};for _,r in ipairs(p.rows or {})do local k={enemy=known(r[1]),subgroup=known(r[2]),group=known(r[3]),count=r[4]or 0,label=known(r[5])};out[key_of(k)]=k end
+ local enemies=type(counts)=="table"and type(counts.enemies)=="table"and counts.enemies or {}
+ local out={}
+ for _,r in ipairs(p.by_enemy or {})do local e=enemies[r[1]];if type(e)=="table"then local k={enemy=known(e[1]),subgroup=known(e[2]),group=known(e[3]),count=r[2]or 0,label=known(e[4])};out[key_of(k)]=k end end
+ for _,r in ipairs(p.rows or {})do local k={enemy=known(r[1]),subgroup=known(r[2]),group=known(r[3]),count=r[4]or 0,label=known(r[5])};out[key_of(k)]=k end
  return out
 end
-function P.new(saved,counts)local data=copy(saved or {version=2,fixed_roles=true,members={}});for id,p in pairs(counts and counts.members or {})do local m=member(data,id,p.class,p.personal);m.enemy_kills=copy(P.kills(p))end;return {data=data,killed=setmetatable({},{__mode="k"}),swings={}}end
+function P.new(saved,counts)local data=copy(saved or {version=2,fixed_roles=true,members={}});for id,p in pairs(counts and counts.members or {})do local m=member(data,id,p.class,p.personal);m.enemy_kills=copy(P.kills(p,counts))end;return {data=data,killed=setmetatable({},{__mode="k"}),swings={}}end
 -- what a saved match keeps of the party's records: kills and the biggest hits
 function P.trim(data)
  if type(data)~="table"or type(data.members)~="table"then return data end
@@ -52,8 +63,8 @@ function P.hit(s,e)
  local p=member(s.data,e.actor,e.class,e.personal)
  if e.category~="melee"and e.category~="ranged"and e.category~="explosion"then return end
 
- record(p,"single_hit",e.damage,e)
- if e.category=="explosion"then record(p,"explosive_single_hit",e.damage,e)end
+ -- an explosion is its own biggest hit, not a single-target one
+ if e.category=="explosion"then record(p,"explosive_single_hit",e.damage,e)else record(p,"single_hit",e.damage,e)end
  if e.category=="melee"then
 
   if not e.group then return end
@@ -81,11 +92,11 @@ end
 local function maxima(a,b)for key,e in pairs(b or {})do if not a[key]or e.value>a[key].value then a[key]=copy(e)end end end
 function P.merge(a,b)
  local result=copy(a or {version=2,fixed_roles=true,members={}})
- for _,p in pairs(result.members or {})do if p.rows then p.enemy_kills=P.kills(p);p.rows=nil end end
+ for _,p in pairs(result.members or {})do if p.rows or p.by_enemy then p.enemy_kills=P.kills(p,a);p.rows,p.by_enemy=nil,nil end end;result.enemies=nil
  if a and b and (a.fixed_roles~=nil or b.fixed_roles~=nil)then result.fixed_roles=a.fixed_roles==true and b.fixed_roles==true end
  for id,p in pairs(b and b.members or {})do local target=member(result,id,p.class,p.personal)
   for key,n in pairs(p.kills or {})do target.kills[key]=(target.kills[key]or 0)+n end
-  for key,k in pairs(P.kills(p))do target.enemy_kills=target.enemy_kills or {};local old=target.enemy_kills[key];if old then old.count=old.count+k.count else target.enemy_kills[key]=copy(k)end end
+  for key,k in pairs(P.kills(p,b))do target.enemy_kills=target.enemy_kills or {};local old=target.enemy_kills[key];if old then old.count=old.count+k.count else target.enemy_kills[key]=copy(k)end end
   maxima(target.best,p.best)
  end;return result
 end

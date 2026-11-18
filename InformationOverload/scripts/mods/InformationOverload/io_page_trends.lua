@@ -30,7 +30,7 @@ local function area(cv,xa,sw,pts,yy,yB)
  if rx then cv:rect(rx,rt,xb-rx,yB-rt,C.gold,false,.09)end;cv.z=z
 end
 local function results(view,cv,ms,y,tracker)
- local n=#ms;local roll=view.io_trend_roll or 5;local won,wins,pts=0,0,{}
+ local n=#ms;local roll=view.io_trend_roll or 5;local won,pts=0,{}
  for i,r in ipairs(ms)do local win=K.info(r).win;if win then won=won+1 end
   local a=roll>0 and math.max(1,i-roll+1)or 1;local w2=0;if roll>0 then for k=a,i do if K.info(ms[k]).win then w2=w2+1 end end else w2=won end;pts[i]={rate=w2/(i-a+1),win=win}end
  y=vcard(view,cv,y,"winrate","Win Rate Over Time",(view.scope.mode=="havoc"and "Havoc"or "Non-Havoc").." · "..K.plural(n,"Mission"),318,function(cy,left)
@@ -170,10 +170,10 @@ end
 -- a clear time follows the Boss Maps switch and a time typed in, so it is worked out each draw rather than kept
 local function times(view,cv,ms,y,tracker)
  local done,by,maps,tm={},{},{},{};local backend_maps={}
- -- a backend time counts here only where Speedrunning counts it, so a late join adds none
+ -- a time counts here only where Speedrunning counts it, so a late join or an unverified clock adds none
  local function counted(r)local t=r.victory and Times.completion(r);return t and t.source=="backend"and Times.counts(r,t)end
  for _,r in ipairs(ms)do if counted(r)then backend_maps[r.context.mission_name]=true end end
- for _,r in ipairs(ms)do local t=K.clear_time(r);local b=t and Times.completion(r).source=="backend";if t and (not b or counted(r))and (not backend_maps[r.context.mission_name]or b)then tm[r]=t;done[#done+1]=r;local name=name_of(tracker,r);local m=by[name];if not m then m={map=name,runs={},fast=t,backend=b};by[name]=m;maps[#maps+1]=m end;m.runs[#m.runs+1]=r;m.fast=math.min(m.fast,t)end end
+ for _,r in ipairs(ms)do local t=K.clear_time(r);local b=t and Times.completion(r).source=="backend";if t and Times.counts(r,Times.completion(r))and (not backend_maps[r.context.mission_name]or b)then tm[r]=t;done[#done+1]=r;local name=name_of(tracker,r);local m=by[name];if not m then m={map=name,runs={},fast=t,backend=b};by[name]=m;maps[#maps+1]=m end;m.runs[#m.runs+1]=r;m.fast=math.min(m.fast,t)end end
  if #done==0 then return K.empty(view,cv,y,"No Clear Times Yet")end
  -- different maps are ranked by their seconds, as map lengths differ far more than the server's times and the mission clock's do
  table.sort(maps,function(a,b)return a.fast<b.fast end)

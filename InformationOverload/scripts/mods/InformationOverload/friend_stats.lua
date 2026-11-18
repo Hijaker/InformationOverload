@@ -34,6 +34,7 @@ function F.refresh(tracker,cache,scope)
     local roster,candidate={},nil
     for key,row in pairs(c.operative_roster or {})do if I.matches(row,id) then roster[key]=true;candidate=row end end
     for _,row in pairs(run.operative_clutches or {})do if I.matches(row,id) then candidate=row;if row.character_id then roster[row.character_id]=true end end end
+    for _,row in pairs(I.team_accounts(tracker.data,c))do if I.matches(row,id)then candidate=candidate or row end end
     if candidate then
      file.patches[c.patch]=file.patches[c.patch]or {};local tally=file.patches[c.patch][c.mode]or {};file.patches[c.patch][c.mode]=tally
      local credited={};for k,v in pairs(candidate)do credited[k]=v end;credited.steam_id=id;local temp={context=c,victory=run.victory,operative_clutches={credited}}
@@ -77,7 +78,7 @@ end
 function F.lines(row,R,E)
  local s=row.stats;local function rate(x)return x.wins.."/"..x.games.." - "..string.format("%.1f",100*x.wins/x.games):gsub("%.0$","").."%"end
  local lines={row.name,"Winrate With You: "..rate(s)};local best,class
- for id,x in pairs(s.classes or {})do if x.games>=5 and (not best or x.wins*best.games>best.wins*x.games or x.wins*best.games==best.wins*x.games and x.games>best.games)then best=x;class=id end end
+ for id,x in pairs(s.classes or {})do if id~="unknown"and x.games>=5 and (not best or x.wins*best.games>best.wins*x.games or x.wins*best.games==best.wins*x.games and x.games>best.games)then best=x;class=id end end
  if best then lines[#lines+1]="Most Successful Class: "..R.class_name(class);lines[#lines+1]="Class Winrate: "..rate(best)end
  lines[#lines+1]="";lines[#lines+1]="Clutch Wins: "..(s.clutch_wins or 0)
  for _,kind in ipairs({"full","semi"})do local n=s[kind.."_clutch_wins"]or 0;if n>0 then lines[#lines+1]=(kind=="full"and "Full Clutch Wins"or "Semi-Clutch Wins")..": "..n end end

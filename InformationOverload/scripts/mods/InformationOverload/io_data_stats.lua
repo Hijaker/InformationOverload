@@ -4,7 +4,7 @@ local base="InformationOverload/scripts/mods/InformationOverload/"
 local D=mod:io_dofile(base.."io_view_definitions")
 local Overview=mod:io_dofile(base.."io_overview")
 local Records=mod:io_dofile(base.."records")
-local Team=mod:io_dofile(base.."team_damage")
+local Warm=mod:io_dofile(base.."warm_parts")
 local Times=mod:io_dofile(base.."mission_times")
 local H=mod:io_dofile(base.."history_presentation")
 local C,rgba,DASH=D.c,D.rgba,Overview.dash
@@ -50,28 +50,15 @@ function K.chron(view)local list=K.scoped(view);local out={};for i=#list,1,-1 do
 local function basis()local o=mod.io_display_options and mod.io_display_options()or {};return o.boss_map_timing and "boss"or "victory"end
 function K.clear_time(run)
  local t=run.victory and Times.completion(run);if not t or type(t.seconds)~="number"then return nil end
- if t.source=="mission_clock"then local marks=run.completion_markers or {};local chosen=basis()=="boss"and marks.boss_death or marks.victory_request or marks.victory_transition
+ if t.source=="mission_clock"then local marks=run.completion_markers or {};local chosen=basis()=="boss"and Times.boss_death(run)or marks.victory_request or marks.victory_transition or marks.win_condition~=marks.boss_death and marks.win_condition
   return chosen and Times.marker(run,chosen)or nil end
  return t.seconds
 end
 local INFO=setmetatable({},{__mode="k"})
 -- a saved mission's team damage is in its match file, so K.warm reads those a draw at a time into one table every page shares
 mod.io_team_share=mod.io_team_share or setmetatable({},{__mode="k"})
-local function share(run)
- local c=run.context;local o={};local data=run.team_damage and Team.from_run(run)
- if data and data.basis~="local_attack_snapshots"then
-  local ops,total,me={},0,nil
-  for id,p in pairs(data.members or {})do if id~="unknown_operative"then local u=Team.summary(data,id,"total").useful
-   if u>0 or p.personal then ops[#ops+1]={id=id,v=u,me=p.personal==true or id==tostring(c.character)};total=total+u;if ops[#ops].me then me=ops[#ops]end end end end
-  table.sort(ops,function(a,b)if a.me~=b.me then return a.me end;return a.v>b.v end)
-  if total>0 and me then o.team={ops=ops,total=total,mine=me.v,share=me.v/total}end
-  if me then local arm={};local p=data.members[me.id]
-   for _,groups in pairs(p.groups or {})do for key,b in pairs(groups)do if key~="void_shield"and (b.reported or 0)>0 then
-    local a=arm[key]or {t=key,dmg=0,useful=0,over=0,unc=key=="unknown"};arm[key]=a;a.dmg=a.dmg+(b.reported or 0);a.useful=a.useful+(b.useful or 0);a.over=a.over+(b.overkill or 0)end end end
-   if next(arm)then o.armour=arm end end
- end
- return o
-end
+-- one match's share, worked out as warm_parts.lua does when a match saves
+local share=Warm.share
 function K.info(run)
  local o=INFO[run]
  if not o then
@@ -81,8 +68,9 @@ function K.info(run)
   if type(kc)=="table"then local t={mh=kc.horde_melee or 0,rh=kc.horde_ranged or 0,el=kc.elite or 0,sp=kc.special or 0,bo=kc.boss or 0};t.sum=t.mh+t.rh+t.el+t.sp+t.bo
    t.no=o.kills and math.max(0,o.kills-t.sum)or 0;t.all=t.sum+t.no;o.types=t end
   -- a saved mission whose summary has a share of yours waits for K.warm to read its file; one without has none to read
-  local mt=getmetatable(run)
-  if mt and mt.io_damage_total~=nil and rawget(run,"team_damage")==nil then o.waiting=mt.io_team_damage_total~=nil or nil
+  local mt=getmetatable(run);local kept=Warm.saved(run,"share")
+  if kept and rawget(run,"team_damage")==nil then o.team,o.armour=kept.team,kept.armour
+  elseif mt and mt.io_damage_total~=nil and rawget(run,"team_damage")==nil then o.waiting=mt.io_team_damage_total~=nil or nil
   else local s=share(run);o.team,o.armour=s.team,s.armour end
   INFO[run]=o
  end
@@ -105,7 +93,7 @@ local warmed=setmetatable({},{__mode="k"})
 function K.prewarm(runs,at)runs=runs or {};if warmed[runs]==#runs then return true end
  if at then if Overview.accepted(at)and K.info(at).waiting then read(at)end;return false end
  for _,run in ipairs(runs)do if Overview.accepted(run)and K.info(run).waiting then read(run);return false end end;warmed[runs]=#runs;return true end
-function K.open_run(view,id)return function()view.io_params=view.io_params or {};view.io_params.run=id;view.io_tab="overview";view:_go("run")end end
+function K.open_run(view,id)return function()view.io_params=view.io_params or {};view.io_params.run=id;view.io_tab="overview";if view.scroll then view.scroll.run=0 end;view:_go("run")end end
 function K.tabs(view,cv,list,cur,pick,y)
  local x=100;for _,t in ipairs(list)do local sel=cur==t[1];local lw=view:_w(t[2],16);local nw=t[3]and view:_w(t[3],14)+10 or 0;local w=lw+nw+30
   view:_ctl(cv,"base",x,y or D.row2,w,34,function()pick(t[1])end,{sel=sel});cv:text(t[2],x+15,y or D.row2,lw+4,34,16,sel and C.gold_hi or C.value)

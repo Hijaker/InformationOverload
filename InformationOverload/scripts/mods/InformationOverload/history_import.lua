@@ -1,6 +1,6 @@
 local I={}
 function I.read(storage,pause)
- assert(storage.a.list,"Local folder scanning is unavailable")
+ assert(not storage.unavailable and storage.a,"Import failed: saving is off.");assert(storage.a.list,"Local folder scanning is unavailable")
  -- a copied match_history folder also holds its patch's file of lines, which is no match
  local files={};for _,path in ipairs(storage.a.list("reconstruction_import/"))do if not ("/"..path):match("[/\\]lines%-%d+%.json$")then files[#files+1]=path end end;table.sort(files)
  local byid={};local count=0

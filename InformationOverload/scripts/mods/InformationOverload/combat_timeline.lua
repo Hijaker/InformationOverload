@@ -85,18 +85,38 @@ function T.merge(a,b)
 end
 -- A saved segment keeps its hits as columns: the gap in ms since the hit before (the first from start_ms), reported damage, and which
 -- profile, attack type, result and flags, kept together in one list of the kinds the segment saw; useful damage only where it differs
--- from reported, and which hits had it unknown. Only the running sequence goes. The mission under way and its checkpoint keep the tuples.
-function T.pack(s)
- if type(s)~="table"or type(s.events)~="table"then return s end
- local t,d,k,kinds,useful,unknown,ids={},{},{},{},{},{},{}
+-- from reported, as the gap since the last such hit then the value, and which hits had it unknown, as runs of a first hit and a count.
+-- Only the running sequence goes. The gaps go under a name the older columns never had, so a build that knows only those finds no hits
+-- rather than hits read wrong. A segment of a match the next part of its mission may yet join keeps the older columns, the gaps as t,
+-- useful damage as {hit, value} and the unknown hits listed, as an older build joins them. The mission under way and its checkpoint
+-- keep the tuples.
+local function marks(ev)
+ local useful,unknown,last={},{},0
+ for i,e in ipairs(ev)do
+  if e[3]==false then local n=#unknown;if n>0 and unknown[n-1]+unknown[n]==i then unknown[n]=unknown[n]+1 else unknown[n+1]=i;unknown[n+2]=1 end
+  elseif e[3]~=e[2]then useful[#useful+1]=i-last;useful[#useful+1]=e[3];last=i end
+ end
+ return useful,unknown
+end
+function T.pack(s,joinable)
+ if type(s)~="table"or joinable and type(s.events)~="table"then return s end
+ -- a segment saved with the older columns has them written again from its hits
+ if type(s.events)~="table"then local h=s.hits
+  if type(h)=="table"and type(h.t)=="table"then local ev=T.events(s);h.gaps,h.t=h.t,nil;h.useful_gaps,h.unknown_runs=marks(ev);h.useful,h.unknown=nil,nil end
+  return s
+ end
+ local t,d,k,kinds,ids={},{},{},{},{}
  local prev=s.start_ms or 0
  for i,e in ipairs(s.events)do
   t[i]=e[1]-prev;prev=e[1];d[i]=e[2]
   local key=tostring(e[4]).."|"..tostring(e[5]).."|"..tostring(e[6]).."|"..tostring(e[7])
   local id=ids[key];if not id then kinds[#kinds+1]={e[4],e[5],e[6],e[7]};id=#kinds;ids[key]=id end;k[i]=id
-  if e[3]==false then unknown[#unknown+1]=i elseif e[3]~=e[2]then useful[#useful+1]={i,e[3]}end
  end
- s.hits={t=t,d=d,k=k,kinds=kinds,useful=useful,unknown=unknown};s.events,s.sequence=nil,nil;s.version=3
+ if joinable then local useful,unknown={},{}
+  for i,e in ipairs(s.events)do if e[3]==false then unknown[#unknown+1]=i elseif e[3]~=e[2]then useful[#useful+1]={i,e[3]}end end
+  s.hits={t=t,d=d,k=k,kinds=kinds,useful=useful,unknown=unknown}
+ else local useful,unknown=marks(s.events);s.hits={gaps=t,d=d,k=k,kinds=kinds,useful_gaps=useful,unknown_runs=unknown}end
+ s.events,s.sequence=nil,nil;s.version=3
  return s
 end
 -- a segment's hits as tuples {ms, reported, useful_or_false, profile, attack type, result, flags}, whichever way it keeps them
@@ -104,12 +124,14 @@ local unpacked=setmetatable({},{__mode="k"})
 function T.events(s)
  if type(s)~="table"then return nil end
  if type(s.events)=="table"then return s.events end
- local h=s.hits;if type(h)~="table"or type(h.t)~="table"then return nil end
+ local h=s.hits;local gaps=type(h)=="table"and (h.gaps or h.t);if type(gaps)~="table"then return nil end
  local ev=unpacked[s];if ev then return ev end
  ev={};local d,k,kinds,ms=h.d or {},h.k or {},h.kinds or {},s.start_ms or 0
- for i,gap in ipairs(h.t)do ms=ms+gap;local kind=kinds[k[i]]or {};ev[i]={ms,d[i],d[i],kind[1],kind[2],kind[3],kind[4]or 0}end
- for _,u in ipairs(h.useful or {})do local e=ev[u[1]];if e then e[3]=u[2]end end
- for _,i in ipairs(h.unknown or {})do local e=ev[i];if e then e[3]=false end end
+ for i,gap in ipairs(gaps)do ms=ms+gap;local kind=kinds[k[i]]or {};ev[i]={ms,d[i],d[i],kind[1],kind[2],kind[3],kind[4]or 0}end
+ if type(h.useful_gaps)=="table"then local g,i=h.useful_gaps,0;for j=1,#g-1,2 do i=i+g[j];local e=ev[i];if e then e[3]=g[j+1]end end
+ else for _,u in ipairs(h.useful or {})do local e=ev[u[1]];if e then e[3]=u[2]end end end
+ if type(h.unknown_runs)=="table"then local r=h.unknown_runs;for j=1,#r-1,2 do for i=r[j],math.min(r[j]+r[j+1]-1,#ev)do local e=ev[i];if e then e[3]=false end end end
+ else for _,i in ipairs(h.unknown or {})do local e=ev[i];if e then e[3]=false end end end
  unpacked[s]=ev;return ev
 end
 -- Derive compact graph rows on demand, never store a duplicate bucket truth.

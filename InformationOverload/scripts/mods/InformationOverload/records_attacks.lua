@@ -23,6 +23,35 @@ function Records:begin_attack(c)
     return id
 end
 
+local function add_damage(group,armour,damage,health)
+    for _,key in ipairs({"all",armour}) do
+        local stats=group[key] or {total=0,useful=0,overkill=0,hits=0,health_hits=0}
+        group[key]=stats
+        stats.total=stats.total+damage
+        stats.hits=stats.hits+1
+        if type(health)=="number" and health==health and health>0 and health<math.huge then
+            local useful=math.min(damage,health)
+            stats.useful=stats.useful+useful
+            stats.overkill=stats.overkill+damage-useful
+            stats.health_hits=stats.health_hits+1
+        end
+    end
+end
+
+function Records:weapon_damage_hit(slot,special,armour,damage,health)
+    local m=self.mission
+    if not m or m.context.excluded or armour=="void_shield" or type(damage)~="number"
+        or damage~=damage or damage<=0 or damage>=math.huge then return end
+    m.damage=m.damage or {}
+    m.damage.weapons=m.damage.weapons or {}
+    local weapons=m.damage.weapons
+    weapons[slot]=weapons[slot] or {}
+    local groups=weapons[slot]
+    local mode=special==true and "special" or special==false and "regular" or "unknown"
+    groups[mode]=groups[mode] or {}
+    add_damage(groups[mode],armour or "unknown",damage,health)
+end
+
 function Records:run_damage_hit(c,e)
     local m=self.mission
     if not m then return end
@@ -34,17 +63,11 @@ function Records:run_damage_hit(c,e)
     local armour=tostring(e.armour or "unknown")
     local groups={"total",category}
     if category=="dot" then groups[#groups+1]="dot_"..tostring(e.dot_type or "other") end
+    -- the Flamer's own share of the burn; its table is there from the first burn tick, so a match with it is known to keep the split
+    if category=="dot" and e.dot_type=="burn" then m.damage.dot_burn_flamer=m.damage.dot_burn_flamer or {};if e.flamer then groups[#groups+1]="dot_burn_flamer" end end
     for _,name in ipairs(groups) do
         local group=m.damage[name] or {};m.damage[name]=group
-        for _,key in ipairs({"all",armour}) do
-            local stats=group[key] or {total=0,useful=0,overkill=0,hits=0,health_hits=0};group[key]=stats
-            stats.total=stats.total+damage;stats.hits=stats.hits+1
-            local health=e.health_before
-            if type(health)=="number" and health==health and health>0 and health<math.huge then
-                local useful=math.min(damage,health)
-                stats.useful=stats.useful+useful;stats.overkill=stats.overkill+damage-useful;stats.health_hits=stats.health_hits+1
-            end
-        end
+        add_damage(group,armour,damage,e.health_before)
     end
 end
 
@@ -69,6 +92,14 @@ function Records:hit(id, e)
     group.total=group.total+damage
     if a.context.explosive and e.is_explosion~=false then group.explosion_total=(group.explosion_total or 0)+damage end
     group.targets[target]=(group.targets[target] or 0)+damage
+    if a.context.hitscan_explosive and e.is_explosion==false then
+        a.direct_target_damage=a.direct_target_damage or {};a.direct_target_damage[target]=(a.direct_target_damage[target] or 0)+damage
+        group.direct_targets=group.direct_targets or {};group.direct_targets[target]=(group.direct_targets[target] or 0)+damage
+    end
+    if a.context.hitscan_explosive and e.is_explosion==true then
+        group.explosion_targets=group.explosion_targets or {};group.explosion_targets[target]=(group.explosion_targets[target] or 0)+damage
+        a.explosion_target_names=a.explosion_target_names or {};a.explosion_target_names[target]=a.target_names[target]
+    end
     a.kills = a.kills + (e.killed and 1 or 0)
     a.headshot = a.headshot or e.headshot == true
     if e.boss_id and e.boss_max_health then
@@ -95,16 +126,17 @@ function Records:commit(a)
     self:best(c, "head_combined", cur.head_combined)
     self:best(c, "kills", cur.kills)
     self:best(c, "damage", a.damage)
-    if c.explosive then
+    if c.explosive and (a.explosion_damage or 0)>0 then
         local enemies={};local seen={}
-        for _,enemy in pairs(a.target_names or {}) do if not seen[enemy] then seen[enemy]=true;enemies[#enemies+1]=enemy end end
+        for _,enemy in pairs(a.explosion_target_names or a.target_names or {}) do if not seen[enemy] then seen[enemy]=true;enemies[#enemies+1]=enemy end end
         table.sort(enemies);c.enemy=table.concat(enemies,", ");self:best(c,"explosive_hit",a.explosion_damage or 0);c.enemy=nil
     end
     local targets = 0
     for target,damage in pairs(a.target_damage) do
         c.enemy=a.target_names and a.target_names[target] or "Unknown"
         targets=targets+1
-        if not c.explosive and not self:is_class_grenade(c) then self:best(c,"single_hit",damage) end
+        if not c.explosive and not self:is_class_grenade(c) then self:best(c,"single_hit",damage)
+        elseif c.hitscan_explosive and a.direct_target_damage and a.direct_target_damage[target] then self:best(c,"single_hit",a.direct_target_damage[target]) end
     end
     c.enemy=nil
     if c.category == "melee" and targets>1 then
@@ -114,21 +146,24 @@ function Records:commit(a)
     end
     for armour,group in pairs(a.armour_damage) do
         local metrics={damage=group.total}
-        if c.explosive then metrics.explosive_hit=group.explosion_total or 0 else
+        if c.explosive then
+            if (group.explosion_total or 0)>0 then metrics.explosive_hit=group.explosion_total end
+        else
             if not self:is_class_grenade(c) then
                 for _,damage in pairs(group.targets) do metrics.single_hit=math.max(metrics.single_hit or 0,damage) end
             end
         end
+        for _,n in pairs(group.direct_targets or {}) do metrics.single_hit=math.max(metrics.single_hit or 0,n) end
         if c.category=="melee" and targets>1 then metrics.melee_cleave=group.total end
         for _,row in ipairs(self:rows_for(c)) do
             row.armour_best=row.armour_best or {}
             local bucket=row.armour_best[armour] or {best={},sources={}}
             row.armour_best[armour]=bucket
             for stat,n in pairs(metrics) do
-                if self.mission then local m=self.mission;m.replay_armour=m.replay_armour or {};local id=key(c,false).."|"..armour.."|"..stat;local old=m.replay_armour[id];if not old or n>old.value then local source=copy(c);local enemies,seen={},{};local high=-1;local single;for target,value in pairs(group.targets)do local enemy=a.target_names and a.target_names[target]or "Unknown";if value>high then high=value;single=enemy end;if not seen[enemy]then enemies[#enemies+1]=enemy;seen[enemy]=true end end;table.sort(enemies);source.enemy=stat=="single_hit"and single or table.concat(enemies,", ");m.replay_armour[id]={context=source,armour=armour,name=stat,value=n}end end
+                if self.mission then local m=self.mission;m.replay_armour=m.replay_armour or {};local id=key(c,false).."|"..armour.."|"..stat;local old=m.replay_armour[id];if not old or n>old.value then local source=copy(c);local enemies,seen={},{};local high=-1;local single;for target,value in pairs(stat=="single_hit"and group.direct_targets or stat=="explosive_hit"and group.explosion_targets or group.targets)do local enemy=a.target_names and a.target_names[target]or "Unknown";if value>high then high=value;single=enemy end;if not seen[enemy]then enemies[#enemies+1]=enemy;seen[enemy]=true end end;table.sort(enemies);source.enemy=stat=="single_hit"and single or table.concat(enemies,", ");m.replay_armour[id]={context=source,armour=armour,name=stat,value=n}end end
                 if n>(bucket.best[stat] or 0) then bucket.best[stat]=n;bucket.sources[stat]=copy(c)
                     local enemies={};local seen={};local highest=-1;local single_enemy
-                    for target,value in pairs(group.targets) do
+                    for target,value in pairs(stat=="single_hit"and group.direct_targets or stat=="explosive_hit"and group.explosion_targets or group.targets) do
                         local enemy=a.target_names and a.target_names[target] or "Unknown"
                         if value>highest then highest=value;single_enemy=enemy end
                         if not seen[enemy] then seen[enemy]=true;enemies[#enemies+1]=enemy end
@@ -199,6 +234,26 @@ function Records:reset_kill_run(c)
     self:mode_streak(c.patch,c.mode).current.kill_run=0
     for stat in pairs(run.current) do run.current[stat]=0 end
     self.dirty=true
+end
+
+-- Server-only blasts have no client shot grouping. This metric is explicitly one target report.
+function Records:reported_explosion_hit(c,e)
+    local n=e.damage
+    if not self:accept(c) or type(n)~="number" or n~=n or n<=0 or n>=math.huge or e.armour=="void_shield" then return end
+    local stat="explosive_single_hit"
+    self:best(c,stat,n)
+    local armour=tostring(e.armour or "unknown")
+    if self.mission then
+        local m=self.mission;m.replay_armour=m.replay_armour or {}
+        local id=key(c,false).."|"..armour.."|"..stat
+        local old=m.replay_armour[id]
+        if not old or n>old.value then m.replay_armour[id]={context=copy(c),armour=armour,name=stat,value=n} end
+    end
+    for _,row in ipairs(self:rows_for(c)) do
+        row.armour_best=row.armour_best or {}
+        local bucket=row.armour_best[armour] or {best={},sources={}};row.armour_best[armour]=bucket
+        if n>(bucket.best[stat] or 0) then bucket.best[stat]=n;bucket.sources[stat]=copy(c);self.dirty=true end
+    end
 end
 
 end

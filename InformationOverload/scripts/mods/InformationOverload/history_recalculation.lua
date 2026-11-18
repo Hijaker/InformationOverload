@@ -17,13 +17,24 @@ function H.kind(run)
  if run.interrupted then return "early_leave"end;if run.resumed then return "rejoined"end
  if run.full==false then return run.context and run.context.mode=="havoc"and "partial_unknown"or "late_join"end;return "full"
 end
-function H.enabled(run,policy)local kind=H.kind(run);return kind=="full"or (policy or {})[kind]~=false end
+function H.enabled(run,policy)local kind=H.kind(run);policy=policy or {}
+ -- a havoc partial is a late join or a rejoin; it is left out once both are
+ if kind=="partial_unknown"then return policy.late_join~=false or policy.rejoined~=false end
+ return kind=="full"or policy[kind]~=false end
 -- A saved match keeps each context its record entries name once, in a list beside them, with the parts every one of those contexts
 -- shares kept once more as shared; an entry is {context number, name, value}, and an armour entry {context number, armour, name, value}.
+-- Each context is a row of values under one sorted list of keys, with the entries under names older builds never read, so they find no
+-- entries rather than entries read wrong; a match the next part of its mission may yet join keeps named contexts, as an older build
+-- joins them.
 local function context_key(c)local keys={};for k in pairs(c)do keys[#keys+1]=k end;table.sort(keys);local out={}
  for i,k in ipairs(keys)do local v=c[k];out[i]=k.."="..type(v)..":"..tostring(v)end;return table.concat(out,"|")end
-function H.pack(c)
- if type(c)~="table"or c.version==2 or (type(c.best)~="table"and type(c.armour)~="table")then return c end
+local function rows(c)local keys,seen={},{}
+ for _,ctx in ipairs(c.contexts or {})do for k in pairs(ctx)do if type(k)~="string"then return c end;if not seen[k]then seen[k]=true;keys[#keys+1]=k end end end
+ table.sort(keys);local list={};for i,ctx in ipairs(c.contexts or {})do local row={};for j,k in ipairs(keys)do if ctx[k]~=nil then row[j]=ctx[k]end end;list[i]=row end
+ c.version=3;c.context_keys=keys;c.contexts=list;c.best_entries,c.armour_entries,c.best,c.armour=c.best,c.armour,nil,nil;return c end
+function H.pack(c,joinable)
+ if type(c)~="table"or c.version==3 or (type(c.best)~="table"and type(c.armour)~="table")then return c end
+ if c.version==2 then if joinable then return c end;local out={};for k,v in pairs(c)do out[k]=v end;return rows(out)end
  local contexts,ids,out={},{},{version=2,shared={},contexts={},best={},armour={}}
  for _,field in ipairs({"best","armour"})do for _,e in ipairs(c[field]or {})do
   -- an entry with anything beyond its context, name, value and armour is kept as it was
@@ -36,17 +47,19 @@ function H.pack(c)
  if contexts[1]then for k,v in pairs(contexts[1])do local all=true;for _,ctx in ipairs(contexts)do if ctx[k]~=v then all=false;break end end;if all then out.shared[k]=v end end end
  for i,ctx in ipairs(contexts)do local own={};for k,v in pairs(ctx)do if out.shared[k]==nil then own[k]=v end end;out.contexts[i]=own end
  for k,v in pairs(c)do if out[k]==nil then out[k]=v end end
- return out
+ if joinable then return out end
+ return rows(out)
 end
 -- a match's best or armour entries as {context, name, value, armour}, from either shape; each has a context of its own, or, for a
 -- reader that only looks, entries naming one context share one table
 function H.entries(c,field,look)
  if type(c)~="table"then return {}end
- if c.version~=2 then return c[field]or {}end
- local shared,contexts,out,made=c.shared or {},c.contexts or {},{},{}
+ if c.version~=2 and c.version~=3 then return c[field]or {}end
+ local shared,contexts,keys,out,made=c.shared or {},c.contexts or {},c.version==3 and (c.context_keys or {}),{},{}
  local function context(n)if look and made[n]then return made[n]end
-  local t={};for k,v in pairs(shared)do t[k]=v end;for k,v in pairs(contexts[n]or {})do t[k]=v end;made[n]=t;return t end
- for _,e in ipairs(c[field]or {})do
+  local t={};for k,v in pairs(shared)do t[k]=v end;local own=contexts[n]or {}
+  if keys then for i=1,#keys do if own[i]~=nil then t[keys[i]]=own[i]end end else for k,v in pairs(own)do t[k]=v end end;made[n]=t;return t end
+ for _,e in ipairs(c[c.version==3 and field.."_entries"or field]or {})do
   if field=="armour"then out[#out+1]={context=context(e[1]),armour=e[2],name=e[3],value=e[4]}
   else out[#out+1]={context=context(e[1]),name=e[2],value=e[3]}end
  end
@@ -112,10 +125,11 @@ local function boss_tallies(r,run)
 end
 function H.rebuild(R,baseline,data,policy,read_only,pause)
  local runs=data.run_history or {};local base=clone(baseline);base.run_history={};base.run_sequence=data.run_sequence
- local damage_reset=data.history_damage_reset_after;local damage_metrics={damage=true,single_hit=true,melee_cleave=true,explosive_hit=true}
+ local damage_reset=data.history_damage_reset_after;local damage_metrics={damage=true,single_hit=true,melee_cleave=true,explosive_hit=true,explosive_single_hit=true}
  -- a baseline taken after the damage reset carries it, and already holds only the bests set since
  local before_reset=damage_reset and baseline.history_damage_reset_after~=damage_reset
  local byid={};for _,run in ipairs(runs)do byid[run.id]=run end
+ local late={}
  -- who each saved teammate record names, so a tie in a match saved before counts were numbered keeps its operative
  local credits=data.record_credits or R.record_credits and R.record_credits(data.rows)or {}
  for _,name in ipairs(derived)do local previous=base[name];base[name]={};for patch in pairs(base.history_legacy_patches or {})do if previous and previous[patch]then base[name][patch]=previous[patch]end end end
@@ -155,6 +169,12 @@ function H.rebuild(R,baseline,data,policy,read_only,pause)
     for _,entry in ipairs(H.entries(contribution,"best"))do if not (damage_reset and run.id<=damage_reset and damage_metrics[entry.name])then r:best(entry.context,entry.name,entry.value)end end
     for _,entry in ipairs(H.entries(contribution,"armour"))do if not (damage_reset and run.id<=damage_reset)then for _,row in ipairs(r:rows_for(entry.context))do row.armour_best=row.armour_best or {};local bucket=row.armour_best[entry.armour]or {best={},sources={}};row.armour_best[entry.armour]=bucket;if entry.value>(bucket.best[entry.name]or 0)then bucket.best[entry.name]=entry.value;bucket.sources[entry.name]=clone(entry.context)end end end end
     for i,segment in ipairs(contribution.kill_segments or {})do if i>1 then r:reset_kill_run(c)end;local kr=r:kill_run(c);for k,n in pairs(segment)do kr.current[k]=(kr.current[k]or 0)+n;kr.best[k]=math.max(kr.best[k]or 0,kr.current[k])end;for _,record in ipairs({r:mode_streak(c.patch,c.mode),r:class_mode_streak(c.patch,c.mode,c.class)})do record.current.kill_run=(record.current.kill_run or 0)+(segment.total or 0);record.best.kill_run=math.max(record.best.kill_run or 0,record.current.kill_run)end end
+   elseif type(run.records)=="table"and (run.id or 0)>(baseline.run_sequence or 0)then
+    -- a match saved before contributions keeps one figure per best in records, with no weapon or enemy, so they go to a row without either, after the row the match made when played;
+    -- they are put in once every match is, so a newer match that reached the same figure keeps it with its weapon
+    r:mission_row(m.context);local own=context(c);own.weapon,own.category,own.explosive,own.grenade,own.enemy=nil,nil,nil,nil,nil
+    for _,name in ipairs({"single_hit","melee_cleave","explosive_hit","damage","kills","dodges","head_combined","head_melee","head_ranged"})do local v=run.records[name]
+     if type(v)=="number"and v>0 and not (damage_reset and run.id<=damage_reset and damage_metrics[name])then late[#late+1]={own,name,v,run.id}end end
    end
    boss_tallies(r,run)
    if not run.data_only and type(run.victory)=="boolean"then
@@ -170,10 +190,23 @@ function H.rebuild(R,baseline,data,policy,read_only,pause)
    for _,update in ipairs(m.enemy_updates or {})do local hit=update.row.enemy_hits and update.row.enemy_hits[update.enemy];if hit and hit.damage==update.value then hit.run_id=run.id end end
   end
  end
+ local held=r.mission;r.mission=nil
+ for _,e in ipairs(late)do local won={};for _,row in ipairs(r:rows_for(e[1]))do if e[3]>(row.best[e[2]]or 0)then won[#won+1]=row end end
+  r:best(e[1],e[2],e[3]);for _,row in ipairs(won)do row.best_runs=row.best_runs or {};row.best_runs[e[2]]=e[4]end end
+ r.mission=held
  -- left off rather than false
  for run,excluded in pairs(flags)do run.stats_excluded=excluded or nil end
  apply_carries(math.huge)
  for _,k in ipairs({"history_damage_reset_after","history_patch_carries","friend_tracking","friend_tracking_revision","history_policy_revision","self_leave_pending","character_names"})do r.data[k]=clone(data[k])end
- r.data.run_history=runs;r.data.run_sequence=data.run_sequence;r.data.history_rebuild_version=1;r.data.control_tracking_v55=true;return r.data
+ r.data.run_history=runs;r.data.run_sequence=data.run_sequence;r.data.history_rebuild_version=1;r.data.control_tracking_v55=true;r.data.counted_entries=3;return r.data
+end
+-- Records counted by a build that finds no entries under the newer names have lost every best those entries held, and a count drops
+-- every field it does not carry, this mark among them. True when a history holds such entries without the mark, and it wants counting
+-- again; one with none is marked, as its records were counted from entries every build reads.
+function H.recount_needed(data)
+ if type(data)~="table"or (tonumber(data.counted_entries)or 0)>=3 then return false end
+ for _,run in ipairs(type(data.run_history)=="table"and data.run_history or {})do local c=type(run)=="table"and run.contributions
+  if type(c)=="table"and c.version==3 then return true end end
+ data.counted_entries=3;return false
 end
 return H

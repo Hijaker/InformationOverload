@@ -3,7 +3,6 @@ return function(mod,api,collectors)
  local base="InformationOverload/scripts/mods/InformationOverload/"
  local D=mod:io_dofile(base.."io_view_definitions")
  local M={id="board",name="Mission Board",place="Mourningstar",icon="board",rows={
-  {key="board_briefing",label="Map Briefing",help="Hovering a mission shows your record on its map over the mission details.",kind="toggle",default=true},
   {key="board_briefing_downs",label="What Downs You Here",help="What has downed you on that map, in the briefing.",kind="toggle",default=true},
   {key="board_briefing_mates",label="Won Here With",help="The teammates you have won that map with, in the briefing.",kind="toggle",default=true},
  }}
@@ -15,7 +14,7 @@ return function(mod,api,collectors)
   local now=os.clock()
   if now>=opts_at+.5 then opts_at=now
    local on=mod:is_enabled()and mod:get("screen_board")~=false
-   local brief,downs,mates=row("board_briefing"),row("board_briefing_downs"),row("board_briefing_mates")
+   local brief,downs,mates=true,row("board_briefing_downs"),row("board_briefing_mates")
    opts.on,opts.brief,opts.downs,opts.mates=on,brief,downs,mates
   end
   return opts

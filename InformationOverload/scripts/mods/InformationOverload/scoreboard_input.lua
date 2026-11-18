@@ -71,7 +71,7 @@ return function(mod,SB,S)
   if ctx=="hud"and not P.cursor then return nil end
   local p=I.cursor(input,k);if p then p.sw,p.sh=sw,sh end;return p
  end
- -- after the paged board is drawn, ctx "hud", "esc" or "end", its box in screen units
+ -- after the paged board is drawn, ctx "hud" or "end", its box in screen units
  function I.drawn(ctx,x,y,w,h,input,k)
   local now=os.clock();st.drawn,st.ctx=now,ctx
   if now>=st.off_at then st.off_at=now+.5;st.off.mouse_left,st.off.mouse_right=bound("left"),bound("right")end

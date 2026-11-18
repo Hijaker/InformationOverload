@@ -142,7 +142,7 @@ end
 function P.carry(data,old,new,policy)
  local function clone(v) if type(v)~="table" then return v end;local t={};for k,x in pairs(v) do t[k]=clone(x) end;return t end
  local cats=policy.categories or {};local classes=policy.classes or {};local weapons=policy.weapons or {}
- local damage={damage=true,single_hit=true,melee_cleave=true,explosive_hit=true,total_damage_mission=true}
+ local damage={damage=true,single_hit=true,melee_cleave=true,explosive_hit=true,explosive_single_hit=true,total_damage_mission=true}
  local class_metrics={blo=true,pbb_ammo_mission=true,kills_mission=true}
  local function allowed(c) return not classes[c.class] and not weapons[c.weapon] end
  local copies={}

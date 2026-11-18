@@ -8,9 +8,16 @@ local class_labels={broker="Hive Scum",adamant="Arbites",cryptic="Skitarii",vete
 function Records.class_name(id) return class_labels[id] or "Unknown class" end
 
 local mod = get_mod and get_mod("information_overload")
+local function part(path)
+    local c=mod.io_records_parts
+    if not c then c={};mod.io_records_parts=c end
+    local v=c[path]
+    if v==nil then v=mod:io_dofile(path);c[path]=v end
+    return v
+end
 local Core
 if mod and mod.io_dofile then
-    Core=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/records_core")
+    Core=part("InformationOverload/scripts/mods/InformationOverload/records_core")
 else
     Core=dofile("InformationOverload/scripts/mods/InformationOverload/records_core.lua")
 end
@@ -24,6 +31,22 @@ Records.rows_for,Records.best,Records.mission_row=Core.rows_for,Core.best,Core.m
 
 local function bot_identity(identity)
  return identity and (identity.human==false or identity.is_bot==true or type(identity.name)=="string"and identity.name:find("[BOT]",1,true)~=nil)
+end
+-- A record's row and source each hold a copy of the mission's context, which keeps your own build alone: the squad's are the match's, in its file.
+local function own_source(c)
+ local L=type(c)=="table"and c.operative_loadouts;if type(L)~="table"then return false end
+ local me,name=c.character~=nil and tostring(c.character)or nil,c.character_name
+ local mine,cut={},false;for k,v in pairs(L)do if k==me or k==name then mine[k]=v else cut=true end end
+ if cut then c.operative_loadouts=next(mine)and mine or nil end;return cut
+end
+function Records:trim_sources()
+ local cut=false
+ for _,row in pairs(self.data.rows or {})do if type(row)=="table"then
+  if own_source(row.context)then cut=true end
+  for _,source in pairs(row.best_weapons or {})do if own_source(source)then cut=true end end
+  for _,bucket in pairs(row.armour_best or {})do for _,source in pairs(type(bucket)=="table"and bucket.sources or {})do if own_source(source)then cut=true end end end
+ end end
+ if cut then self.dirty=true end;return cut
 end
 function Records:remove_known_bots()
  local changed={}
@@ -65,6 +88,7 @@ function Records.new(saved)
         current = {head_melee = 0, head_ranged = 0, head_combined = 0, dodges = 0, kills = 0, blo = 0}, dirty = false }, Records)
     tracker:normalize_boss_records()
     tracker:remove_known_bots()
+    tracker:trim_sources()
     for _,run in ipairs(tracker.data.run_history or {}) do tracker:cache_class_run(run) end
     tracker:initialize_class_win_streaks()
     tracker:initialize_class_mode_streaks()
@@ -91,7 +115,7 @@ local survival_events = {
 
 local Presentation
 if mod and mod.io_dofile then
-    Presentation=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/records_presentation")
+    Presentation=part("InformationOverload/scripts/mods/InformationOverload/records_presentation")
 else
     Presentation=dofile("InformationOverload/scripts/mods/InformationOverload/records_presentation.lua")
 end
@@ -99,7 +123,7 @@ Presentation(Records)
 
 local Blo
 if mod and mod.io_dofile then
-    Blo=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/records_blo")
+    Blo=part("InformationOverload/scripts/mods/InformationOverload/records_blo")
 else
     Blo=dofile("InformationOverload/scripts/mods/InformationOverload/records_blo.lua")
 end
@@ -107,7 +131,7 @@ Blo(Records,copy,deep_copy,key)
 
 local Incidents
 if mod and mod.io_dofile then
-    Incidents=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/records_incidents")
+    Incidents=part("InformationOverload/scripts/mods/InformationOverload/records_incidents")
 else
     Incidents=dofile("InformationOverload/scripts/mods/InformationOverload/records_incidents.lua")
 end
@@ -115,7 +139,7 @@ Incidents(Records,deep_copy,key,survival_events)
 
 local Bosses
 if mod and mod.io_dofile then
-    Bosses=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/records_bosses")
+    Bosses=part("InformationOverload/scripts/mods/InformationOverload/records_bosses")
 else
     Bosses=dofile("InformationOverload/scripts/mods/InformationOverload/records_bosses.lua")
 end
@@ -123,7 +147,7 @@ Bosses(Records)
 
 local Progress
 if mod and mod.io_dofile then
-    Progress=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/records_progress")
+    Progress=part("InformationOverload/scripts/mods/InformationOverload/records_progress")
 else
     Progress=dofile("InformationOverload/scripts/mods/InformationOverload/records_progress.lua")
 end
@@ -131,7 +155,7 @@ Progress(Records,copy)
 
 local Attacks
 if mod and mod.io_dofile then
-    Attacks=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/records_attacks")
+    Attacks=part("InformationOverload/scripts/mods/InformationOverload/records_attacks")
 else
     Attacks=dofile("InformationOverload/scripts/mods/InformationOverload/records_attacks.lua")
 end
@@ -139,11 +163,14 @@ Attacks(Records,copy,key)
 
 local Missions
 if mod and mod.io_dofile then
-    Missions=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/records_missions")
+    Missions=part("InformationOverload/scripts/mods/InformationOverload/records_missions")
 else
     Missions=dofile("InformationOverload/scripts/mods/InformationOverload/records_missions.lua")
 end
 Missions(Records,copy,deep_copy,checkpoint_copy,key,fresh_row,survival_events)
+local finish_mission=Records.finish_mission
+local function trimmed(self,...)self:trim_sources();return ...end
+function Records:finish_mission(...)return trimmed(self,finish_mission(self,...))end
 
 return Records
 

@@ -216,10 +216,10 @@ return function(mod, api, C, initial)
         if existing and existing.deadline>C.clock and existing.actor~=actor then pickup_helpers[key]={ambiguous=true,deadline=C.clock+4};return end
         pickup_helpers[key]={actor=actor,deadline=C.clock+4}
     end
-    local function pickup(target,actor)
+    local function pickup(target,actor,from)
         local m=api.tracker().mission;if not m then return end
         local key=member(target);if not key then return end
-        local pending=pickup_helpers[key];local pickup_state=control_states[key];if pickup_state~="knocked_down"and pickup_state~="hogtied"then pickup_state=nil end;actor=actor or (pending and pending.deadline>=C.clock and not pending.ambiguous and pending.actor)
+        local pending=pickup_helpers[key];local pickup_state=from or control_states[key];if pickup_state~="knocked_down"and pickup_state~="hogtied"then pickup_state=nil end;actor=actor or (pending and pending.deadline>=C.clock and not pending.ambiguous and pending.actor)
         if actor then local owner=Managers.state and Managers.state.player_unit_spawn;owner=owner and owner.owner and owner:owner(actor)
          if not owner then for _,p in pairs(Managers.player:players()or {})do if p.player_unit==actor then owner=p;break end end end
          if owner and not human(owner)then
@@ -268,10 +268,9 @@ return function(mod, api, C, initial)
             if personal and event~="died" then api.tracker():survival_event(event) end
             if personal and (event=="knocked_down" or event=="died") then local data,t=timeline();if data then Timeline.reset(data,t,event)end;api.tracker():reset_kill_run(m.context) end
             api.tracker():incident(event,personal,not personal and id or nil,class)
-            if personal then local record=api.tracker():mode_streak(m.context.patch,m.context.mode);local scoped=api.tracker():class_mode_streak(m.context.patch,m.context.mode,m.context.class);for name,d in pairs(api.tracker().mode_streak_fields) do if d.event==event then record.current[name]=0;scoped.current[name]=0 end end end
             api.save()
         end
-        if (previous=="knocked_down" or previous=="hogtied") and ({walking=true,jumping=true,falling=true,dodging=true,sliding=true,sprinting=true,idle=true})[state] then pickup(unit) end
+        if (previous=="knocked_down" or previous=="hogtied") and ({walking=true,jumping=true,falling=true,dodging=true,sliding=true,sprinting=true,idle=true})[state] then pickup(unit,nil,previous) end
     end
     local function refresh_controls()
         local clutch_states,clutch_owner={},nil

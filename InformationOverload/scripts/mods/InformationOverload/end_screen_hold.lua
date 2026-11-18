@@ -1,18 +1,20 @@
--- Information Overload: Keep The End Screen Up. The end screen stays until the minutes set have passed since it opened, or until Continue is
+-- Information Overload: Prolong End Screen. The end screen stays until the minutes set have passed since it opened, or until Continue is
 -- pressed, while the mission's server moves on without the player; dropped by it, a loading screen stays up through character select, which
--- starts the game with the character already in use, and on into the Mourningstar. At 1 minute the end screen goes when the game says.
+-- starts the game with the character already in use, and on into the Mourningstar. At 1 minute the end screen goes when the game says;
+-- at 0 it stays until Continue. Voting to merge Strike Teams puts it back to the game's minute, so the player goes on with the new Strike Team;
+-- held past the server's move, the merge vote has nothing left to do and fades.
 return function(mod,on)
  local H={}
  -- the move the game wanted is held here, so a mods reload while it is held still lets it go; the game cannot ask for it again
  local P=mod:persistent_table("io_end_screen_hold")
- local KEEP={min=1,max=10,default=1}
+ local KEEP={min=0,max=10,default=1}
  -- how long character select may sit behind the loading screen before it is shown after all
  local SAFETY=15
  local function minutes()local m=tonumber(mod:get("endscreen_keep_up_minutes"))or KEEP.default;return math.max(KEEP.min,math.min(KEEP.max,math.floor(m+.5)))end
  H.KEEP,H.minutes=KEEP,minutes
  local function holding()return P.pending~=nil or P.dropped~=nil end
  H.holding=holding
- local function due(now)local m=minutes();return m<=KEEP.min or now-(P.opened or now)>=60*m end
+ local function due(now)if P.merge then return true end;local m=minutes();if m==0 then return false end;return m<=1 or now-(P.opened or now)>=60*m end
  local function game_state(name)local ok,s=pcall(require,"scripts/game_states/game/"..name);return ok and s or nil end
  local SGS
  local function let_go(p,now)
@@ -44,6 +46,25 @@ return function(mod,on)
  end)
  -- while held, Continue by its key or a click lets it go rather than leaving the mission; cards still playing are skipped through as ever
  function H.end_view(EndView)
+  -- the Continue button counts down the minutes set from the end screen opening, not the game's one, and shows no count at 0
+  -- the player's own vote to merge, read as the buttons and the vote update each frame, as it can be cast and taken back while the vote is up;
+  -- read here, not in a hook on the view's update, which screen_endscreen holds
+  mod:hook(EndView,"_update_buttons",function(func,self,...)
+   P.merge=self._stay_in_party=="yes"or nil
+   local m=minutes();local w=self._widgets_by_name and self._widgets_by_name.continue_button;local c=w and w.content
+   if not (c and on()and m~=1 and P.opened and not P.done and not P.merge)then return func(self,...)end
+   local was=c.time;c.time=m>1 and math.max(0,60*m-(os.clock()-P.opened))or nil
+   local ok,err=pcall(func,self,...);c.time=was;if not ok then error(err,0)end
+  end)
+  -- once the server has moved on during a hold the merge vote fades as a finished one does, and a press on it does nothing
+  local function moot()return on()and (P.pending~=nil or P.dropped~=nil)end
+  mod:hook(EndView,"_update_voting_button_visibility",function(func,self,...)
+   P.merge=self._stay_in_party=="yes"or nil
+   if not moot()then return func(self,...)end
+   local was=self._stay_in_party_voting_active;self._stay_in_party_voting_active=false
+   local ok,err=pcall(func,self,...);self._stay_in_party_voting_active=was;if not ok then error(err,0)end
+  end)
+  mod:hook(EndView,"_cb_on_stay_in_party_pressed",function(func,self,...)if moot()then return end;func(self,...);P.merge=self._stay_in_party=="yes"or nil end)
   mod:hook(EndView,"_trigger_current_presentation_skip",function(func,self,...)
    if holding()and self._summary_finished~=false then P.release=true;return end
    return func(self,...)

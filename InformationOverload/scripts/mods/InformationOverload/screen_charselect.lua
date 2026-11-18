@@ -1,10 +1,12 @@
--- Information Overload: the Character Select screen, the picked operative's service record beside the model a mode at a time and the Account Wallet moved down beside Start.
+-- Information Overload: the Character Select screen, the picked operative's service record beside the model a mode at a time, the Account Wallet moved down beside Start
+-- and the game's news in a bar under Start.
 return function(mod,api,collectors)
  local base="InformationOverload/scripts/mods/InformationOverload/"
  local M={id="charselect",name="Character Select",place="Main Menu",icon="charselect",rows={
   {key="charselect_record",label="Service Record",help="Missions won, kills and damage for the operative you pick, one mode at a time.",kind="toggle",default=true},
   {key="charselect_weapons",label="Weapons Taken Most",help="The weapons that operative takes out most.",kind="toggle",default=true},
   {key="charselect_downs",label="What Downs Them",help="What downs and grabs that operative most.",kind="toggle",default=true},
+  {key="charselect_news",label="News Bar",help="Adds a remade news panel to replace the one I/O hides while its Service Record is enabled for Character Select. Off hides the news altogether.",kind="toggle",default=true},
  }}
  local defaults={};for _,r in ipairs(M.rows)do defaults[r.key]=r.default end
  local function row(key)local v=mod:get(key);if v==nil then return defaults[key]end;return v==true end
@@ -79,7 +81,8 @@ return function(mod,api,collectors)
   return model
  end
  local lines,lines_key,cyc={},{},{}
- function M.reset()model,model_data,lines,lines_key,cyc=nil,nil,{},{},{}end
+ local News
+ function M.reset()model,model_data,lines,lines_key,cyc=nil,nil,{},{},{};if News then News.reset()end end
  local WHITE,GOLD,LABEL,SHADOW={255,218,228,210},{255,199,167,129},{255,117,126,110},{150,0,0,0}
  local function w(s)return "{#color(218,228,210)}"..s.."{#reset()}"end
  local function times(n)if n==1 then return w("Once")elseif n==2 then return w("Twice")end;return w(people().commas(n)).." Times"end
@@ -174,14 +177,16 @@ return function(mod,api,collectors)
   if cyc.from then cyc.f=cyc.f+(dt or 0);if cyc.f>=FADE then cyc.from=nil end end
   if hot and input_get(input,"left_pressed")==true then go(hot)end
   if n>1 and not over then cyc.t=cyc.t+(dt or 0);if cyc.t>=HOLD then go(cyc.i%n+1)end end
-  local function sized(t)if fit>=1 then return t end;return (t:gsub("{#size%((%d+)%)}",function(s)return "{#size("..math.floor(s*fit+.5)..")}"end))end
+  -- a line's shrunk text is kept on it until the fit changes, so a steady record runs no gsub per frame
+  local function shrink(t)return (t:gsub("{#size%((%d+)%)}",function(s)return "{#size("..math.floor(s*fit+.5)..")}"end))end
+  local function sized(l)if fit>=1 then return l.p,l.t end;if l.fit~=fit then l.fit,l.sp,l.st=fit,shrink(l.p),shrink(l.t)end;return l.sp,l.st end
   -- a mode fading in or out takes its inline colours down with it
   local function faded(t,a)if a>=1 then return t end;return (t:gsub("{#color%((%d+),(%d+),(%d+)%)}",function(r,g,b)return "{#color("..r..","..g..","..b..","..math.floor(255*a+.5)..")}"end))end
   local tint={0,0,0,0};local function col(c,a)tint[1],tint[2],tint[3],tint[4]=c[1]*a,c[2],c[3],c[4];return tint end
   local function lay(Lx,a)if a<=0 then return end
-   for _,l in ipairs(Lx)do local x,y,s,h=cx+l.x*fit-300,top+l.y*fit,math.max(1,l.s*k*fit),l.h*fit
-    Renderer.draw_text(renderer,sized(l.p),s,"proxima_nova_bold",Vector3(x+1,y+2,40),Vector2(600,h),col(SHADOW,a),ALIGN)
-    Renderer.draw_text(renderer,faded(sized(l.t),a),s,"proxima_nova_bold",Vector3(x,y,41),Vector2(600,h),col(l.c,a),ALIGN)
+   for _,l in ipairs(Lx)do local x,y,s,h=cx+l.x*fit-300,top+l.y*fit,math.max(1,l.s*k*fit),l.h*fit;local sp,st=sized(l)
+    Renderer.draw_text(renderer,sp,s,"proxima_nova_bold",Vector3(x+1,y+2,40),Vector2(600,h),col(SHADOW,a),ALIGN)
+    Renderer.draw_text(renderer,faded(st,a),s,"proxima_nova_bold",Vector3(x,y,41),Vector2(600,h),col(l.c,a),ALIGN)
    end
   end
   local p=cyc.from and math.min(1,cyc.f/FADE)or 1
@@ -194,9 +199,26 @@ return function(mod,api,collectors)
    Renderer.draw_rect(renderer,Vector3(cx-60*fit,ly,41),Vector2(120*fit*math.min(1,cyc.t/HOLD),2*fit),GOLD)
   end
  end
+ -- the news card is left out only while the record has the right side, and keeps the game's own visibility otherwise
+ local function covered(view)
+  if broken or not on()or not record_on()then return nil end
+  local id=picked(view);if not id or not shows(id)then return nil end
+  local news=view._news_element;if not news or news._visible==false then return nil end
+  return news
+ end
+ -- the card's news goes to a bar above the list while the card is left out; a fault in the bar stops the bar alone
+ local bar_broken
+ local function bar(view,renderer,dt,input)
+  if bar_broken or not row("charselect_news")or not covered(view)then return end
+  News=News or mod:io_dofile(base.."charselect_news")(mod)
+  local k=renderer.scale or RESOLUTION_LOOKUP.scale or 1
+  local ui=Managers.ui;local cur=input_get(input,"cursor");if ui and ui.using_cursor_navigation and not ui:using_cursor_navigation()then cur=nil end
+  News.draw(view,renderer,dt,input,k,cur and cur[1]/k,cur and cur[2]/k)
+ end
  function M.draw(view,renderer,dt,input)
   if broken or not renderer or not on()or not record_on()then return end
   local ok,err=pcall(body,view,renderer,dt,input);if not ok then fail(err)end
+  if not broken then local okb,errb=pcall(bar,view,renderer,dt,input);if not okb then bar_broken=true;mod:error("I/O character select news bar: %s",tostring(errb))end end
  end
  -- the game's wallet keeps its look and moves down beside Start while the screen is on, with no switch of its own; off, it goes back where the game put it
  local moved=setmetatable({},{__mode="k"})
@@ -209,12 +231,11 @@ return function(mod,api,collectors)
  end
  -- the mod turned off stops its hooks, so every wallet it moved goes back where the game put it at once
  function M.off()for v in pairs(moved)do pcall(place,v)end end
- -- the news card is left out only while the record has the right side, and keeps the game's own visibility otherwise
+ -- with the News Bar off, the screen on leaves the game's news card out wherever it would show; off, the screen leaves it to the game
  local function news_off(view)
-  if broken or not on()or not record_on()then return nil end
-  local id=picked(view);if not id or not shows(id)then return nil end
-  local news=view._news_element;if not news or news._visible==false then return nil end
-  news._visible=false;return news
+  local news=covered(view)
+  if not news and not broken and on()and not row("charselect_news")then local n=view._news_element;if n and n._visible~=false then news=n end end
+  if news then news._visible=false end;return news
  end
  local function news_back(news)if news and news._visible==false then news._visible=true end end
  local function hidden(view)local ok,news=pcall(news_off,view);if ok then return news end;fail(news)end

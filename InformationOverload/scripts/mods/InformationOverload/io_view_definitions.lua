@@ -47,11 +47,12 @@ function Canvas:rect(x,y,w,h,c,top,k)
  local list=top and self.over or self.under
  list[#list+1]={pass_type="rect",style={color=copy(c,k),offset={x,y,top and 1 or self.z},size={w,h}}}
 end
-function Canvas:texture(material,x,y,w,h,c,top,k)
+-- mv sets the material's own values; every pass keeps its own copy of the material, so two passes of one material can differ
+function Canvas:texture(material,x,y,w,h,c,top,k,mv)
  if self.cx and x<self.cx then return end
  if self.sc then local ok;ok,y=fits(self.sc,y,h);if not ok then return end end
  local list=top and self.over or self.under
- list[#list+1]={pass_type="texture",value=material,style={color=copy(c,k),offset={x,y,top and 1 or self.z},size={w,h},scale_to_material=true}}
+ list[#list+1]={pass_type="texture",value=material,style={color=copy(c,k),offset={x,y,top and 1 or self.z},size={w,h},scale_to_material=true,material_values=mv}}
 end
 -- a dropdown's value, which reads gold when it names one of the crumbs, or always when gold is asked for; the crumbs are only known once the page has drawn
 function Canvas:pick(value,shown,x,y,w,gold)local n=#self.over;self:text(shown,x,y,w,34,16,gold and D.c.gold or D.c.value)
@@ -116,6 +117,7 @@ function Canvas:icon(rows,x,y,c,k,size)
  if rows.dim then self:icon(rows.dim,x,y,c,(k or 1)*.45,size)end
 end
 function Canvas:circle(cx,cy,r,c)
+ if self.sc then local ok,y=fits(self.sc,cy-r,2*r);if not ok then return end;cy=y+r end
  self.over[#self.over+1]={pass_type="circle",style={color=copy(c),offset={cx-r,cy-r,self.z},size={2*r,2*r}}}
 end
 

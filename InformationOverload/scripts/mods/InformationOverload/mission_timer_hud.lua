@@ -12,8 +12,8 @@ return function(mod,collectors,Times)
   Renderer.begin_pass(renderer,scenegraph,nil,0,settings)
   -- draw_text scales the box but not the font, so the font is scaled here
   local size=22*(renderer.scale or RESOLUTION_LOOKUP.scale or 1)
-  Renderer.draw_text(renderer,text,size,"proxima_nova_bold",Vector3(51,31,901),Vector2(180,30),Color(255,0,0,0),text_options)
-  Renderer.draw_text(renderer,text,size,"proxima_nova_bold",Vector3(50,30,902),Vector2(180,30),Color(255,235,235,235),text_options)
+  Renderer.draw_text(renderer,text,size,"proxima_nova_bold",Vector3(51,26,901),Vector2(180,30),Color(255,0,0,0),text_options)
+  Renderer.draw_text(renderer,text,size,"proxima_nova_bold",Vector3(50,25,902),Vector2(180,30),Color(255,235,235,235),text_options)
   Renderer.end_pass(renderer)
  end)
 end

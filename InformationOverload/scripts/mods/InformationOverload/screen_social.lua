@@ -32,6 +32,7 @@ return function(mod,api,collectors)
    local c=run.context or {}
    for _,p in pairs(c.operative_roster or {})do take(p)end
    for _,p in pairs(run.operative_clutches or {})do take(p)end
+   for _,p in pairs(I.team_accounts(tracker.data,c))do take(p)end
   end
   return by
  end
@@ -77,7 +78,9 @@ return function(mod,api,collectors)
   if row("social_missions_together")then content.io_together=M.together(e.missions)end
  end
  -- the mod turned off stops its hooks, so every plaque it filled in gets the game's text back at once
- function M.off()for content in pairs(decorated)do bare(content)end end
+ function M.off()for content in pairs(decorated)do bare(content)end;decorated=setmetatable({},{__mode="k"})end
+ -- the screen switched off with the roster up does the same on its next frame, since the game writes the plaques again only on its own refreshes
+ local function follow()if next(decorated)~=nil and not on()then M.off()end end
  -- the records: yours from the Dossier's figures per operative, a teammate's from the missions they were in, each built once per history
  local Rec,People
  local function record()Rec=Rec or mod:io_dofile(base.."social_record");return Rec end
@@ -176,6 +179,7 @@ return function(mod,api,collectors)
   -- while a record shows it takes the friends list's place: the list, its scrollbar, its tabs and its Show hint are left out for that frame
   local cur
   mod:hook(View,"draw",function(func,self,...)
+   local okf,errf=pcall(follow);if not okf then fail(errf)end
    local ok,info,mine=pcall(showing,self);if not ok then fail(info);info=nil end
    if not info then return func(self,...)end
    local tabs=self._player_list_tab_bar;local bar=self._widgets_by_name and self._widgets_by_name.roster_scrollbar

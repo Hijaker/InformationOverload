@@ -1,6 +1,7 @@
 -- Information Overload: the Psykhanium's mission comparison, melee hits and damage per armour for each loadout taken into a counted match, kept on disk and moved by each match saved or deleted.
 local mod=get_mod("information_overload")
 local Overview=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/io_overview")
+local Warm=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/warm_parts")
 local S={KEY="psyk_summary_v1"}
 -- Raise it when an update counts differently; a summary saved under another number is counted again.
 S.COUNT_VERSION=2
@@ -11,7 +12,10 @@ function S.loadout(run)local c=run and run.context or {};local L=c.operative_loa
 -- blessings and perks in name order, so the same ones in other slots are one loadout
 local function sorted(s,sep)if type(s)~="string"then return ""end;local t={};for x in (s..sep):gmatch("(.-)"..sep:gsub("%p","%%%0"))do t[#t+1]=x end;table.sort(t);return table.concat(t,sep)end
 function S.key(weapon,blessings,perks)return tostring(weapon).."|"..sorted(blessings,", ").."|"..sorted(perks," / ")end
+-- from what the match keeps on its line (warm_parts.lua), or else from its file
+function S.kept(run)return Warm.saved(run,"melee")~=nil end
 function S.hits(run)
+ local kept=run and Warm.saved(run,"melee");if kept then return copy(kept)end
  local g=run and run.damage and run.damage.melee or {};local out={}
  for _,a in ipairs(ARMOUR)do local b=g[a];out[a]={dmg=b and b.total or 0,n=b and b.hits or 0}end
  local all=g.all;out.all={dmg=all and all.total or 0,n=all and all.hits or 0};return out

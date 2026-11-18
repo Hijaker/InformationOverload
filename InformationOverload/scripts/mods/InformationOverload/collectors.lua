@@ -83,8 +83,7 @@ return function(mod, api)
             m.context.mission_instance=m.context.mission_instance or c.mission_instance
             m.context.mission_name=m.context.mission_name or c.mission_name
             m.context.mission_display_name=m.context.mission_display_name or c.mission_display_name
-            invoke(function()
-                if C.clock<(m.next_modifier_sample or 0) then return end
+            if C.clock>=(m.next_modifier_sample or 0) then invoke(function()
                 m.next_modifier_sample=C.clock+2
                 local circumstances=require("scripts/settings/circumstance/circumstance_templates")
                 local chosen={}
@@ -110,7 +109,7 @@ return function(mod, api)
                         if type(key)=="string"then local label=Localize(key);if type(label)=="string" and label~=key and label~="" and not label:find("<unlocalized",1,true) then m.context.modifiers[id]=label end end
                     end
                 end
-            end)
+            end) end
             Context.sample_loadout(m)
         end
         return c
@@ -122,19 +121,19 @@ return function(mod, api)
         BossIdentity=BossIdentity,PsykerEligibility=PsykerEligibility,SocialNames=SocialNames})
     local confirmed_dodge=Incidents.confirmed_dodge
     local barrel_key,barrel_colour,barrel_actor,barrel_report=Incidents.barrel_key,Incidents.barrel_colour,Incidents.barrel_actor,Incidents.barrel_report
-    local lethal_kick,martyrdom_selected=Incidents.lethal_kick,Incidents.martyrdom_selected
-    local explosion_outcome,enemy_incapacitation,combat_report=Incidents.explosion_outcome,Incidents.enemy_incapacitation,Incidents.combat_report
+    local combat_report=Incidents.combat_report
     local helper,pickup,observe_control=Incidents.helper,Incidents.pickup,Incidents.observe_control
-    local refresh_controls,sample_controls,survival=Incidents.refresh_controls,Incidents.sample_controls,Incidents.survival
+    local sample_controls,survival=Incidents.sample_controls,Incidents.survival
     local control_states=Incidents.control_state_table()
     C.modifier_probe=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/modifier_probe")({extension=extension,identity=function(unit)return unit and identity(unit)end,is_enemy=is_enemy})
     local Measurements=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/measurement_collector")(mod,api,C,{local_unit=local_unit,extension=extension,context=live_context,is_enemy=is_enemy,enemy_display=enemy_display,peril_players=peril_players})
     -- The gameplay function is always called unchanged; errors in collection
     -- are isolated. Only the original gameplay errors propagate normally.
+    local PartyWeapon=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/party_weapon")
     local Attacks=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/collector_attacks")(mod,api,C,{
         Armor=Armor,Attack=Attack,DamageCalculation=DamageCalculation,Damage=Damage,local_unit=local_unit,
         extension=extension,breed=breed,enemy_display=enemy_display,is_enemy=is_enemy,context=live_context,
-        Experimental=Measurements,invoke=invoke,contained=contained})
+        Experimental=Measurements,invoke=invoke,contained=contained,PartyWeapon=PartyWeapon})
     local dot_report,dps_report,pack,drain_attacks=Attacks.dot_report,Attacks.dps_report,Attacks.pack,Attacks.drain_attacks
     mod:hook_safe(Dodge, "sucessful_dodge", function(unit, attacker, attack_type, dodge_type)
         confirmed_dodge(unit, dodge_type, attack_type)
@@ -178,7 +177,12 @@ return function(mod, api)
             elseif enemy and attack_type=="melee" and result == "dodged" then confirmed_dodge(target, "dodge", "melee") end
         end
         ClassEvents.report(profile,target,attacker,damage,result)
-        if attacker ~= local_unit() or (attack_type ~= "melee" and attack_type ~= "ranged" and attack_type ~= "explosion") then return end
+        if attacker~=own then return end
+        if attack_type=="shout" then
+            Damage.weapon_report(profile,target,attacker,damage,result,attack_type,measurement)
+            return
+        end
+        if attack_type~="melee" and attack_type~="ranged" and attack_type~="explosion" then return end
         -- Range counters do not depend on attack timing/correlation. Ownership
         -- and enemy identity come from the existing confirmed damage report.
         local distance_counted=false
@@ -187,7 +191,8 @@ return function(mod, api)
             if target and own and Unit.alive(target)and Unit.alive(own)then distance=Vector3.distance(Unit.world_position(own,1),Unit.world_position(target,1))end
             distance_counted=Measurements.distance_report(attack_type,result=="died",distance,measurement and measurement.useful)
         end
-        return Attacks.match_report(profile,target,attacker,weakspot,damage,result,attack_type,measurement,distance_counted)
+        local context,armour,calculated,health=Attacks.match_report(profile,target,attacker,weakspot,damage,result,attack_type,measurement,distance_counted)
+        Damage.weapon_report(profile,target,attacker,damage,result,attack_type,measurement,context,armour,calculated,health)
     end
     local Grouping=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/enemy_grouping")
 local last_enemy_attack=setmetatable({},{__mode="k"})
@@ -199,7 +204,7 @@ local EnemyCatalog=mod:io_dofile("InformationOverload/scripts/mods/InformationOv
     local Bosses=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/collector_bosses")(mod,api,C,{
         breed=breed,extension=extension,is_enemy=is_enemy,enemy_display=enemy_display,local_unit=local_unit,context=live_context,member=member,
         marker=marker,timeline=timeline,Timeline=Timeline,BossIdentity=BossIdentity,EnemyCatalog=EnemyCatalog,
-        Grouping=Grouping,last_enemy_attack=last_enemy_attack})
+        Grouping=Grouping,last_enemy_attack=last_enemy_attack,kill_minute=Damage.kill_minute})
     local watch_prophet,sample_prophet=Bosses.watch_prophet,Bosses.sample_prophet
     local boss_report_credit,kill_credit=Bosses.boss_report_credit,Bosses.kill_credit
     mod:hook_safe("MinionDeathManager","die",function(_,target,attacker,_,_,profile)boss_report_credit(target,attacker,profile,"died");kill_credit(target,attacker,profile);if party_kill then party_kill(target,attacker)end end)
@@ -257,7 +262,6 @@ local EnemyCatalog=mod:io_dofile("InformationOverload/scripts/mods/InformationOv
     hyper_report,haymaker_report=ClassEvents.hyper_report,ClassEvents.haymaker_report
     local Compact=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/team_damage")
     local Party=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/party_records")
-    local PartyWeapon=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/party_weapon")
     Damage.bind_squad({Compact=Compact,Party=Party,PartyWeapon=PartyWeapon,
         local_unit=local_unit,breed=breed,Armor=Armor,member=member,is_enemy=is_enemy,enemy_display=enemy_display,Grouping=Grouping,last_enemy_attack=last_enemy_attack,
         BossIdentity=BossIdentity,extension=extension,EnemyCatalog=EnemyCatalog,Context=Context,Experimental=Measurements,

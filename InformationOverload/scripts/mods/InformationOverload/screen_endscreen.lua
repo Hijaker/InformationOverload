@@ -1,4 +1,4 @@
--- Information Overload: the End Screen, the mission time and records under the squad, the Mission Debrief behind them, the held scoreboard, the hidden mission rating, the vote under Continue and Keep The End Screen Up.
+-- Information Overload: the End Screen, the mission time and records under the squad, the Mission Debrief behind them, the held scoreboard, the hidden mission rating, the vote under Continue, Prolong End Screen, and the game's own scoreboard kept shut.
 return function(mod,api,collectors)
  local base="InformationOverload/scripts/mods/InformationOverload/"
  local Times=mod:io_dofile(base.."mission_times")
@@ -6,26 +6,29 @@ return function(mod,api,collectors)
  local M={id="endscreen",name="End Screen",place="Mission",icon="endscreen",rows={
   {key="endscreen_time_records",label="Mission Time And Records",help="Your clear time and any records you set, under the squad.",kind="toggle",default=true},
   {key="endscreen_debrief",label="Mission Debrief",help="Hover the time and records for the mission's records, kills, damage and how it compares with your others.",kind="toggle",default=true},
-  {key="endscreen_debrief_downs",label="Downs And Deaths",help="Every down and death in the debrief, yours and your teammates', at the time each happened.",kind="toggle",default=true},
+  {key="endscreen_mission_clock",label="Minute By Minute",picture="clock",help="A bar for each minute of the mission across the debrief, with each death marked at the time it happened. Off, downs and deaths show on two lanes in the debrief instead.",kind="toggle",default=true},
  }}
  local defaults={};for _,r in ipairs(M.rows)do defaults[r.key]=r.default end
  local function on()return mod:is_enabled()and mod:get("screen_endscreen")~=false end
- -- Keep The End Screen Up keeps its own keys and is drawn under the rows on the tab by Settings, as Hide Mission Rating is
+ -- Prolong End Screen keeps its own keys and is drawn under the rows on the tab by Settings, as Hide Mission Rating is
  local Hold=mod:io_dofile(base.."end_screen_hold")(mod,on)
  M.KEEP,M.keep_minutes=Hold.KEEP,Hold.minutes
  local function row(key)local v=mod:get(key);if v==nil then return defaults[key]end;return v==true end
  -- Hide Mission Rating keeps its own key and is drawn under the rows on the tab by Settings, so it is not one of them
- local function hide_rating()return on()and mod:get("hide_match_rating")==true end
+ -- Hide Mission Rating is on unless switched off; its key is new, so an older saved "off" does not hold it back
+ local function hide_rating()return on()and mod:get("hide_mission_rating")~=false end
+ -- Remove Game's Scoreboard is a Scoreboard row, on unless switched off, and holds only while I/O's Scoreboard is on
+ local function hide_board()return mod:is_enabled()and mod:get("screen_scoreboard")~=false and mod:get("hide_game_scoreboard")~=false end
  local Debrief
  local function debrief()Debrief=Debrief or mod:io_dofile(base.."endscreen_debrief");return Debrief end
  local function basis()local o=mod.io_display_options and mod.io_display_options()or {};return o.boss_map_timing and "boss"or "victory"end
  -- what a saved run broke: a first or faster clear of its map on its patch, then each Dossier best of its mode it beat; the second list is its class's alone
  function M.broken(tracker,run,how)return debrief().broken(tracker,run,how)end
  function M.records(tracker,run,how)return #(M.broken(tracker,run,how))end
- -- worked out once a mission, and again only if the history moves while the end screen is up
+ -- worked out once a mission, and again only if the history or the timing and overkill settings move while the end screen is up
  local shown
  local function summary(f,sb)
-  local d=f.tracker and f.tracker.data or {};local seq,n,rev=d.run_sequence,#(d.run_history or {}),tostring(d.history_policy_revision)..":"..tostring(mod.io_times_revision)
+  local d=f.tracker and f.tracker.data or {};local o=mod.io_display_options and mod.io_display_options()or {};local seq,n,rev=d.run_sequence,#(d.run_history or {}),tostring(d.history_policy_revision)..":"..tostring(mod.io_times_revision)..":"..basis()..":"..tostring(o.includes_overkill==true)
   if shown and shown.m==f.m and shown.seq==seq and shown.n==n and shown.rev==rev then return shown end
   -- a run saved after the end screen first drew is looked for again
   if shown and shown.m==f.m and f.run==false then f.run=nil end
@@ -47,14 +50,12 @@ return function(mod,api,collectors)
   SHADE[1]=242*a;Renderer.draw_text(renderer,s,size*k,font,Vector3(x+1,y+1,z),Vector2(400,34),SHADE,ALIGN.left)
   local alpha=c[1];c[1]=alpha*a;Renderer.draw_text(renderer,s,size*k,font,Vector3(x,y,z+1),Vector2(400,34),c,ALIGN.left);c[1]=alpha
  end
- -- the mockup is 2000 wide and its card is drawn at 1.07, the game's UI 1920: one card unit is F UI units
- local F=1.07*1920/2000
- M.F=F
  -- the bar's text block from the skull corner to the eagle, as x, height up from the bottom and width
  M.HIT={255.4,104.6,493.4}
- -- the card rises from the bar, centred, its bar's foot 110.4 above the screen's; its top stays under the game's 200 high title block, at the mockup's 202, so a screen shorter than 16:10 draws it smaller
- function M.scale(sh,h)return math.min(F,(sh-110.4-202)/h)end
- function M.origin(sw,sh,h)local f=M.scale(sh,h);return sw/2-debrief().W/2*f,sh-110.4-h*f,f end
+ -- the card is laid out in the game's 1920 wide frame at the screen's own height, centred on a wider screen
+ local Card,Model
+ local function card_mod()Card=Card or mod:io_dofile(base.."endscreen_card");return Card end
+ function M.origin(sw)return (sw-1920)/2 end
  local PREVIEW,CLOSE=.15,.12
  -- hover opens it after a moment, a click keeps it until a click, Back or Esc; Full History asks for the mission's own page
  function M.step(st,where,click,back,t)
@@ -73,42 +74,84 @@ return function(mod,api,collectors)
  -- the player view's input from its last frame, and whether it has been up this end screen
  local over_input,over_seen
  function M.state()return st end
- function M.reset()shown=nil;st={mode="closed"};widths={};over_input,over_seen=nil,nil end
+ local drop_portraits
+ function M.reset()shown=nil;st={mode="closed"};widths={};over_input,over_seen=nil,nil;if drop_portraits then drop_portraits()end end
  local function inside(x,y,r)return x~=nil and x>=r[1]and x<r[1]+r[3]and y>=r[2]and y<r[2]+r[4]end
  local function input_get(input,name)if not input then return nil end;local ok,v=pcall(input.get,input,name);if ok then return v end end
  local tmp={0,0,0,0}
  local function col(c,a)tmp[1]=c[1]*a;tmp[2]=c[2];tmp[3]=c[3];tmp[4]=c[4];return tmp end
  local Z=600
- local function op(renderer,o,ox,oy,f,a,k,c)
-  c=col(c or o.c,a)
-  if o.t=="r"then Renderer.draw_rect(renderer,Vector3(ox+o.x*f,oy+o.y*f,Z+o.l),Vector2(o.w*f,o.h*f),c)
-  elseif o.t=="t"then Renderer.draw_text(renderer,o.s,math.max(1,o.size*f*k),o.font,Vector3(ox+o.x*f,oy+o.y*f,Z+o.l),Vector2(o.w*f,o.h*f),c,ALIGN[o.align])
-  else Renderer.draw_circle(renderer,Vector3(ox+o.x*f,oy+o.y*f,Z+o.l),o.r*f,nil,c)end
+ local function op(renderer,o,ox,a,k)
+  local c=col(o.c,a)
+  if o.t=="r"then Renderer.draw_rect(renderer,Vector3(ox+o.x,o.y,Z+o.l),Vector2(o.w,o.h),c)
+  elseif o.t=="t"then Renderer.draw_text(renderer,o.s,math.max(1,o.size*k),o.font,Vector3(ox+o.x,o.y,Z+o.l),Vector2(o.w,o.h),c,ALIGN[o.align])
+  elseif o.t=="i"then if Renderer.draw_texture then Renderer.draw_texture(renderer,o.mat,Vector3(ox+o.x,o.y,Z+o.l),Vector2(o.w,o.h),c)end
+  elseif o.t=="q"then Renderer.draw_rect_rotated(renderer,Vector2(o.w,o.h),Vector3(ox+o.x,o.y,Z+o.l),o.angle,Vector2(o.pivot_x,o.pivot_y),c)
+  else Renderer.draw_circle(renderer,Vector3(ox+o.x,o.y,Z+o.l),o.r,nil,c)end
  end
- local SCRIM={163,3,5,4}
- -- the layout is built once a mission from the debrief's figures, in card units, so each frame only places it
- local function layout(view,f,sb,s)
-  local downs=row("endscreen_debrief_downs")
-  if s.lay and s.lay_downs==downs then return s.lay end
-  local D=debrief()
-  if not s.model then local secs=sb.final_seconds(f);s.model=D.model(f.tracker,f.m,s.run,secs,basis(),s.list,s.cls)
+ -- the card's figures are worked out once a mission: the debrief's model of the run, then each operative's from the scoreboard's squad rows,
+ -- the squad's damage and kill tables and the mission clock's minutes
+ local function card_model(f,sb,s)
+  if s.card then return s.card end
+  local D=debrief();local secs=sb.final_seconds(f)
+  if not s.model then s.model=D.model(f.tracker,f.m,s.run,secs,basis(),s.list,s.cls)
    -- a solo run's id counts in the solo history, and the panel opens runs of the dashboard's, so it gets no Full History
    if f.tracker~=(api.dashboard_tracker and api.dashboard_tracker())then s.model.run_id=nil end
   end
-  s.lay=D.layout(s.model,function(t,size,font)return width(view,t,size*F,widths,font)/F end,downs);s.lay_downs=downs
-  return s.lay
+  Model=Model or mod:io_dofile(base.."endscreen_card_model")
+  local live=sb.live and sb.live();local run=s.run;local team,party
+  if collectors and collectors.live_squad then team,party=collectors:live_squad(f.m)end
+  if run and run.merged_segment_ids then team,party=mod:io_dofile(base.."team_damage").from_run(run),run.party_records end
+  local dt=api.dashboard_tracker and api.dashboard_tracker();local counts=dt and dt.incident_counts and dt.incident_counts(run or f.m)or {}
+  s.card=Model.model(f.tracker,f,run,s.model,live and live.squad or {},team,party,secs,Times.backend(run or f.m)~=nil,counts)
+  return s.card
+ end
+ -- laid out again only when the selected operative, Minute By Minute, the screen's height or the squad average changes; the hovered minute or marker
+ -- puts only its highlight and readout on that layout
+ local function layout(view,f,sb,s,sh)
+  local Mc=card_model(f,sb,s);local clock=row("endscreen_mission_clock");local hv=st.hover;local squad=mod:get("endscreen_squad_average")==true
+  local key=tostring(st.sel)..(clock and "c"or "n")..(squad and "s"or "y")..sh
+  local measure
+  if not (s.lay and s.lay_key==key)then measure=function(t,size,font)return width(view,t,size,widths,font)end
+   s.lay=card_mod().layout(Mc,{sh=sh,clock=clock,sel=st.sel,measure=measure,squad=squad});s.lay_key=key end
+  if not hv then return s.lay end
+  local hk=hv.kind..hv.i
+  if not (s.pop and s.pop_of==s.lay and s.pop_key==hk)then measure=measure or function(t,size,font)return width(view,t,size,widths,font)end
+   s.pop=card_mod().hover(s.lay,Mc,{sh=sh,clock=clock,sel=st.sel,measure=measure,hover=hv,squad=squad});s.pop_of,s.pop_key=s.lay,hk end
+  return s.pop
+ end
+ -- the selected operative's portrait in the card's portrait slot, as the game's end view has loaded it for its own plate: its frame material with
+ -- the portrait's values put on a material of ours, one per renderer; an operative the end view shows no plate for keeps the dark slot
+ local mats=setmetatable({},{__mode="k"})
+ local function values(m,list)
+  for key,v in pairs(list)do local t=type(v)
+   if t=="number"then Material.set_scalar(m,key,v)
+   elseif t=="string"then Material.set_texture(m,key,v~=""and v or nil)
+   elseif t=="userdata"then Material.set_resource(m,key,v)
+   elseif t=="table"then if #v==1 then Material.set_scalar(m,key,v[1])elseif #v==2 then Material.set_vector2(m,key,Vector2(v[1],v[2]))
+    elseif #v==3 then Material.set_vector3(m,key,Vector3(v[1],v[2],v[3]))elseif #v==4 then Material.set_vector4(m,key,Quaternion.from_elements(v[1],v[2],v[3],v[4]))end end
+  end
+ end
+ local WHITE={255,255,255,255}
+ local function portrait(view,renderer,lay,Mc,ox,a)
+  local op=Mc.squad[lay.sel];if not (op and op.id)then return end
+  local slot;for _,o in ipairs(lay.ops)do if o.id=="portrait"then slot=o;break end end
+  local w;for _,x in ipairs(view._game_mode_condition_widgets or {})do local c=x.content;if c and c.portrait_character_id~=nil and tostring(c.portrait_character_id)==op.id then w=x end end
+  local ps=w and w.style and w.style.character_portrait;local name=w and w.content.character_portrait
+  if not (slot and ps and type(name)=="string")then return end
+  local held=mats[renderer];if not held or held.name~=name then if held then pcall(Renderer.destroy_material,renderer,held.m)end;held={name=name,m=Renderer.create_material(renderer,name)};mats[renderer]=held end
+  values(held.m,ps.material_values or {})
+  local k=renderer.scale or 1
+  Renderer.script_draw_bitmap(renderer,held.m,Vector3((ox+slot.x)*k,slot.y*k,Z+slot.l+1),Vector3(slot.w*k,slot.h*k,0),col(WHITE,a))
+ end
+ drop_portraits=function()for r,held in pairs(mats)do pcall(Renderer.destroy_material,r,held.m);mats[r]=nil end end
+ local function frame(view,sh,lit,link,link_lit)
+  local key=st.mode..sh..(lit and "l"or "")..(link and "h"or "")..(link_lit and "k"or "")
+  if st.frame and st.frame_key==key then return st.frame end
+  st.frame=card_mod().frame({sh=sh,mode=st.mode,lit=lit,link=link and true or false,link_lit=link_lit,dim=sh-M.HIT[2],measure=function(t,size,font)return width(view,t,size,widths,font)end});st.frame_key=key
+  return st.frame
  end
  local function rect(renderer,x,y,w,h,c,z,a)Renderer.draw_rect(renderer,Vector3(x,y,z),Vector2(w,h),col(c,a))end
- local function card(renderer,lay,a,k,ox,oy,f,sw,sh,where)
-  local C=Debrief.c;local pinned=st.mode=="pinned";local w,h,H=Debrief.W*f,lay.card*f,lay.h*f
-  if pinned then rect(renderer,0,0,sw,sh-M.HIT[2],SCRIM,Z-10,a)end
-  local edge=pinned and C.edge or C.frame
-  rect(renderer,ox,oy,w,H,pinned and C.pinned or C.preview,Z,a)
-  rect(renderer,ox,oy,w,1,edge,Z+1,a);rect(renderer,ox,oy+H-1,w,1,edge,Z+1,a);rect(renderer,ox,oy,1,H,edge,Z+1,a);rect(renderer,ox+w-1,oy,1,H,edge,Z+1,a)
-  rect(renderer,ox,oy+h,w,1,C.frame,Z+1,a);rect(renderer,ox,oy,120*f,2*f,C.accent,Z+2,a)
-  for _,o in ipairs(lay.ops)do op(renderer,o,ox,oy,f,a,k)end
-  for _,o in ipairs(pinned and lay.pinned or lay.preview)do op(renderer,o,ox,oy,f,a,k,o.id=="back"and where=="back"and C.back_hover or nil)end
- end
  local function open_history(id)
   local ui=Managers.ui;if not ui or not id then return end
   if mod.io_hold_icons then mod.io_hold_icons()end
@@ -138,30 +181,65 @@ return function(mod,api,collectors)
   put(renderer,M.TIP_SAY,16,x+16+s+14,y+h/2-17,HI,a,k,"proxima_nova_medium",205)
  end
  -- the hint beside the records, the hover and clicks, and the card while it is open
+ -- Boss Damage against your average: what each earlier match at this difficulty keeps on its line or the Mourningstar read ahead, and only
+ -- for one it has not reached, what its file holds, one file a frame; once all are in the row gets its average and the card is laid out again
+ local Warm
+ local function boss_step(s)
+  local b=s.boss
+  if not b then if not (s.model and s.card)then return end;b={list=s.model.before or {},i=1,sum=0,n=0};s.boss=b end
+  if b.done then return end
+  Warm=Warm or mod:io_dofile(base.."warm_parts")
+  local read=false
+  while b.i<=#b.list do local run=b.list[b.i];local w=Warm.boss_of(run)
+   if not w then if read then return end;read=true;w=Warm.read_boss(run)end
+   if type(w.mine)=="number"then b.sum,b.n=b.sum+w.mine,b.n+1 end;b.i=b.i+1
+  end
+  b.done=true
+  local me=s.card.squad[1]
+  if b.n>0 and me then for i,r in ipairs(s.card.avg.rows)do if r.l=="Boss Damage"then s.card.avg.rows[i]=card_mod().avgRow("Boss Damage",me.boss,b.sum/b.n,true,false)end end;s.lay=nil end
+ end
+ -- a portrait that fails to draw is told once and the slot stays dark
+ local faceless
  local function talk(view,renderer,f,sb,s,input,t,a,k,sw,sh,hx,hy)
-  local lay=layout(view,f,sb,s)
+  local lay=layout(view,f,sb,s,sh)
+  if not s.boss or not s.boss.done then local ok=pcall(boss_step,s);if not ok then s.boss={done=true}end;lay=layout(view,f,sb,s,sh)end
   -- with a controller in use a mouse left resting on the bar opens nothing, and the tip, which only a hover puts away, is left off
   local ui=Managers.ui;local pad=ui and ui.using_cursor_navigation and not ui:using_cursor_navigation()
   local inv=1/k;local cur=input_get(input,"cursor");if pad then cur=nil end;local cx,cy=cur and cur[1]*inv,cur and cur[2]*inv
-  local ox,oy,f=M.origin(sw,sh,lay.h)
+  local ox=M.origin(sw)
   local seen=mod:get(M.TIP_KEY)==true
   local where=inside(cx,cy,{M.HIT[1],sh-M.HIT[2],M.HIT[3],M.HIT[2]})and "bar"or nil
+  local fr=frame(view,sh,false,s.model.run_id);local plate,hover,swap
   if not where and st.mode~="closed"then
-   local function hot(r)return r and {ox+r[1]*f,oy+r[2]*f,r[3]*f,r[4]*f}end
-   if st.mode=="pinned"and inside(cx,cy,hot(lay.hot.back))then where="back"
-   elseif lay.hot.link and inside(cx,cy,hot(lay.hot.link))then where="link"
-   elseif inside(cx,cy,{ox,oy,Debrief.W*f,lay.h*f})then where="panel"end
+   local function hot(r)return r and {ox+r[1],r[2],r[3],r[4]}end
+   if st.mode=="pinned"and inside(cx,cy,hot(fr.hot.back))then where="back"
+   elseif fr.hot.link and inside(cx,cy,hot(fr.hot.link))then where="link"
+   elseif inside(cx,cy,hot(fr.hot.card))then where="panel"
+    for _,h in ipairs(lay.hot)do if inside(cx,cy,{ox+h.x,h.y,h.w,h.h})then if h.id=="plate"then plate=h.i elseif h.id=="avgswitch"then swap=true else hover=hover or {kind=h.id,i=h.i}end end end
+   end
   end
   -- the held or tapped-on scoreboard is drawn in this pass far under the card, so while it shows the card, its dim and the tip step aside and keep their state
   local held=sb.state~=nil and sb.S.held(sb.state,os.clock(),sb.finished and sb.finished())and not (sb.hold_layout and sb.hold_layout(true)=="off")
   if held then where=nil end
-  local act=not held and M.step(st,where,input_get(input,"left_pressed")==true,input_get(input,"back")==true,t)
+  local press=input_get(input,"left_pressed")==true
+  -- a click on a plate shows that operative's card, and locks it
+  if not held and press and plate and st.mode~="closed"then st.sel=plate end
+  -- a click on the Against heading of your own card flips it between your average and the squad's, kept for next time
+  if not held and press and swap and st.mode~="closed"then mod:set("endscreen_squad_average",mod:get("endscreen_squad_average")~=true)end
+  local hv=st.mode~="closed"and not held and hover or nil
+  if (hv and (not st.hover or st.hover.kind~=hv.kind or st.hover.i~=hv.i))or (not hv and st.hover)then st.hover=hv end
+  local act=not held and M.step(st,where,press,input_get(input,"back")==true,t)
   if act=="link"then open_history(s.model.run_id)end
   if st.mode~="closed"and not seen then mod:set(M.TIP_KEY,true);seen=true end
   if not seen and not held and not pad then tip(view,renderer,sh,t,a,k)end
   local pinned=st.mode=="pinned"
   put(renderer,pinned and "Click To Unlock"or where=="bar"and "Click To Lock"or "Hover For Debrief",15,hx,hy,pinned and HINT_PIN or where=="bar"and HINT_ON or HINT,a,k,"proxima_nova_medium")
-  if st.mode~="closed"and not held then card(renderer,lay,a,k,ox,oy,f,sw,sh,where)end
+  if st.mode~="closed"and not held then
+   lay=layout(view,f,sb,s,sh);fr=frame(view,sh,where=="back",s.model.run_id,where=="link")
+   for _,o in ipairs(fr.ops)do op(renderer,o,ox,a,k)end
+   for _,o in ipairs(lay.ops)do op(renderer,o,ox,a,k)end
+   if not faceless then local ok,err=pcall(portrait,view,renderer,lay,s.card,ox,a);if not ok then faceless=true;mod:error("I/O end screen portrait: %s",tostring(err))end end
+  end
  end
  -- set into the game's bar left of the eagle, the time on Continue's line and the records under it
  local function lines(view,renderer,input,t,full)
@@ -199,6 +277,8 @@ return function(mod,api,collectors)
  -- Layout E: while the vote is up it sits on the line under Continue, its right edge on Continue's, and Rate Mission is always lifted to the screen's right edge, level with the XP bar; with End Screen off the game's own layout is kept
  -- the XP bar's middle is 244 up from the screen's foot, and Rate Mission's title and thumbs, 12 to 78 down its 96, have theirs 51 up from its own
  local LINE,GAP,LIFT_X,LIFT_Y=31,8,169.2,-(244-51)
+ -- Vote Complete: on one line in a box twice Continue's width, its end on Continue's, CLEAR above Continue's words
+ local CLEAR=8
  local function node(view,id,x,y,ha)
   local kept=view.io_kept;local n=view._ui_scenegraph[id];local p=n.position
   local o=kept[id]or {p[1],p[2],n.horizontal_alignment};kept[id]=o;if x==nil then x,y,ha=o[1],o[2],o[3]end
@@ -208,9 +288,11 @@ return function(mod,api,collectors)
   local w=view._widgets_by_name;local vs,cs=w.stay_in_party_vote.style,w.continue_button.style;cs.hotspot=cs.hotspot or {}
   local hot={size={0,LINE},offset={0,0,0}};view.io_hot=hot
   -- Continue's own hints sit under its text, where the vote now is, so they go above it, and the vote's own hint, under the screen's edge now, a line above those
-  local function up(o,dy)o=o or {0,0,0};return {o[1]or 0,(o[2]or 0)-dy,o[3]or 0}end
+  local function up(o,dy,dx)o=o or {0,0,0};return {(o[1]or 0)-(dx or 0),(o[2]or 0)-dy,o[3]or 0}end
+  local done=cs.vote_done_tooltip
   local list={{vs.vote_text,"text_horizontal_alignment","right"},{vs.vote_count_text,"text_horizontal_alignment","right"},{vs.vote_count_text,"font_size",22},{vs.hotspot,"size",hot.size},{vs.hotspot,"offset",hot.offset},
-   {cs.hotspot,"size",{c.size[1],LINE}},{cs.tooltip,"offset",up(cs.tooltip.offset,c.size[2])},{cs.vote_done_tooltip,"offset",up(cs.vote_done_tooltip.offset,c.size[2])},
+   {cs.hotspot,"size",{c.size[1],LINE}},{cs.tooltip,"offset",up(cs.tooltip.offset,c.size[2])},
+   {done,"offset",up(done.offset,c.size[2]+CLEAR,c.size[1]),always=true},{done,"size",{2*c.size[1],c.size[2]},always=true},
    {vs.tooltip,"text_horizontal_alignment","right"},{vs.tooltip,"offset",up(vs.tooltip.offset,2*LINE+view._ui_scenegraph.vote_text.size[2])}}
   for _,e in ipairs(list)do e[4]=e[1][e[2]]end
   return list
@@ -228,7 +310,7 @@ return function(mod,api,collectors)
    moved=node(view,"vote_text",R,top+vn.size[2],"right");moved=node(view,"vote_count_text",R-tw-GAP,top+sg.vote_count_text.size[2],"right")or moved
    view.io_hot.size[1]=tw;view.io_hot.offset[1]=vn.size[1]-tw
   else moved=node(view,"vote_text");moved=node(view,"vote_count_text")or moved end
-  for _,s in ipairs(view.io_sets)do local v=up and s[3]or s[4];if s[1][s[2]]~=v then s[1][s[2]]=v end end
+  for _,s in ipairs(view.io_sets)do local v=(up or e and s.always)and s[3]or s[4];if s[1][s[2]]~=v then s[1][s[2]]=v end end
   local o=view.io_kept.rate_match or {sg.rate_match.position[1],sg.rate_match.position[2],sg.rate_match.horizontal_alignment};view.io_kept.rate_match=o
   if e and not hide_rating()then moved=node(view,"rate_match",sg.rate_match.size[1]-LIFT_X,o[2]+LIFT_Y,"right")or moved
   else moved=node(view,"rate_match")or moved end
@@ -241,8 +323,10 @@ return function(mod,api,collectors)
   if hide_rating()then if not self.io_rating_hidden then w.visible=false;self.io_rating_hidden=true end
   elseif self.io_rating_hidden then w.visible=true;self.io_rating_hidden=nil end
  end
- -- the mod turned off stops its hooks, so an end screen already up gets the game's rating and vote back at once
- function M.off()Hold.off();local ui=Managers.ui;local v=ui and ui:view_instance("end_view");if v then rating(v);place(v)end end
+ -- the game puts its scoreboard prompt right only on its own events, never each frame, so Remove Game's Scoreboard switched either way on the screen already up is put to it here
+ local function board(self)local h=hide_board();if self.io_board~=h then self.io_board=h;self:_update_session_stats_prompt()end end
+ -- the mod turned off stops its hooks, so an end screen already up gets the game's rating, vote and scoreboard prompt back at once, and its scoreboard is hidden again when the mod comes back
+ function M.off()Hold.off();local ui=Managers.ui;local v=ui and ui:view_instance("end_view");if v then rating(v);place(v);v.io_board=nil;v:_update_session_stats_prompt()end end
  mod:hook_require("scripts/ui/views/end_view/end_view",function(EndView)
   if EndView.io_endscreen==M then return end;EndView.io_endscreen=M
   mod:hook_safe(EndView,"_setup_rate_match",rating)
@@ -251,7 +335,14 @@ return function(mod,api,collectors)
    if hide_rating()then return end
    return func(self,rating)
   end)
-  mod:hook_safe(EndView,"update",function(self)rating(self);if mod:is_enabled()or self.io_kept then place(self)end end)
+  mod:hook_safe(EndView,"update",function(self)rating(self);board(self);if mod:is_enabled()or self.io_kept then place(self)end end)
+  -- the game's own scoreboard stays shut while hidden, by its prompt or its key, and a press shuts one left open; shown, the game's own prompt is put back
+  mod:hook(EndView,"_toggle_session_stats",function(func,self,...)if hide_board()then return self:_update_session_stats_prompt()end;return func(self,...)end)
+  mod:hook(EndView,"_update_session_stats_prompt",function(func,self,...)
+   if not hide_board()then return func(self,...)end
+   local w=self._widgets_by_name and self._widgets_by_name.session_stats_prompt;if w then w.visible=false end
+   local e=self._session_stats_element;if e and e.expanded and e:expanded()then e:set_expanded(false)end
+  end)
   mod:hook_safe(EndView,"_draw_widgets",function(self,_,t,input,renderer)draw(self,renderer,"end_view",input,t)end)
   Hold.end_view(EndView)
   mod:hook_safe(EndView,"on_exit",function()

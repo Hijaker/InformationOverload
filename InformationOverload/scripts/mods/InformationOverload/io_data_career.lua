@@ -19,7 +19,7 @@ function K.share(n,total)if type(n)~="number"or type(total)~="number"or total<=0
 local function pct(w,g)if not g or g<=0 then return DASH end;return num(100*w/g).."%"end
 local function count(n)return type(n)=="number"and n>0 and tostring(n)or DASH end
 function K.weapon(id)local f=mod.io_weapon_name;if type(f)=="function"then local ok,name=pcall(f,id);if ok and type(name)=="string"then return name end end;return id and tostring(id)or DASH end
-function K.open_run(view,id)return function()view.io_params=view.io_params or {};view.io_params.run=id;view.io_tab="overview";view:_go("run")end end
+function K.open_run(view,id)return function()view.io_params=view.io_params or {};view.io_params.run=id;view.io_tab="overview";if view.scroll then view.scroll.run=0 end;view:_go("run")end end
 function K.parts(label)local out={};for p in tostring(label):gmatch("[^/]+")do out[#out+1]=p:gsub("^%s+",""):gsub("%s+$","")end;return out end
 -- drawing
 function K.fit(view,text,size,maxw)
@@ -38,7 +38,7 @@ function K.empty(view,cv,title)view:_card(cv,D.left,D.row2,D.width,92,title or "
 function K.dropdown(view,base,popup,id,x,y,w,label,value,current,options,pick)
  local open=view.dd==id
  view:_ctl(base,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open})
- local lw=view:_w(label,16);base:text(label,x+12,y,lw+4,34,16,C.label);base:pick(value,K.fit(view,value,16,w-lw-56),x+20+lw,y,w-lw-56)
+ local lw=view:_w(label,16);base:text(label,x+12,y,lw+4,34,16,C.label);base:pick(value,K.fit(view,value,16,w-lw-66),x+20+lw,y,w-lw-56)
  base:chevron(x+w-24,y+13,"down",10,C.value)
  if not open or #options==0 then return end
  local pw,py=math.max(w,260),y+38;local per=math.max(1,math.floor((D.bottom-py)/30));local cols=math.ceil(#options/per)
@@ -166,50 +166,17 @@ function K.class_overview(tracker,scope,class)
    if n>0 then m.other[#m.other+1]={"Missions Won With A "..p[2],tostring(n)};m.other[#m.other+1]={"Most "..p[3].." In One Win",tostring(gm[p[1].."_clutch_episodes"]or 0)}end end
  end
  if (gm.failed_clutches_game or 0)>0 then m.other[#m.other+1]={"Most Failed Clutches In One Loss",tostring(gm.failed_clutches_game)}end
- m.hyper={};if class=="broker"then local s=Hyper.summary(tracker,patch)
+ m.hyper={};if class=="broker"then local s=Hyper.summary(tracker,patch,mode)
   if s and (s.highest or 0)>0 then m.hyper={{"Most Hyper-Critical Kills In A Mission",tostring(s.highest)},{"Average Hyper-Critical Kills Per Mission",num(s.average or 0)}}end end
  m.perils={};if class=="psyker"then
-  local context=tracker.mission and tracker.mission.context
-  if not context or context.class~="psyker"or patch and context.patch~=patch then context=nil
-   local history=tracker.data.run_history or {};for i=#history,1,-1 do local run=history[i];local c=run.context
-    if c and c.class=="psyker"and (not patch or c.patch==patch)and not run.data_only and not c.training_history_test and c.difficulty~="psykhanium"then context=c;break end end
-  end
-  local best=Nav.summary(tracker,{patch=patch,class=class}).best.psyker_safe_missions or 0;local now=context and tracker:mission_row(context).psyker_safe_current or 0
+  -- the class streak across difficulties, the one the Streaks page shows
+  local best=tonumber(general.best.personal_peril_safe)or 0;local now=tonumber(general.current.personal_peril_safe)or 0
   if best>0 or now>0 then m.perils={{"Missions Without A Peril Detonation (Best)",tostring(best)},{"Missions Without A Peril Detonation (Current)",tostring(now)}}end
  end
  local runs={};for _,run in ipairs(Overview.runs(tracker))do local c=run.context
   if c.mode==mode and c.class==class and (not patch or c.patch==patch)then runs[#runs+1]=run end end
  m.bars={};for i=math.min(40,#runs),1,-1 do local run=runs[i]
   local mo,d=tostring(run.started_at or ""):match("^%d+%-(%d+)%-(%d+)");m.bars[#m.bars+1]={id=run.id,win=run.victory==true,damage=(Records.run_mission_damage(run)),date=d and d.."/"..mo or ""}end
- return m
-end
--- damage records for one class: Overall, By Armour, By Enemy, By Weapon
-local KINDS={{"single_hit","Biggest Single-Target Hit"},{"melee_cleave","Biggest Melee Cleave"},{"explosive_hit","Biggest Explosion"}}
-K.kinds=KINDS
-K.armour_names={unarmored="Unarmoured",armored="Flak",berserker="Maniac",super_armor="Carapace",resistant="Unyielding",disgustingly_resilient="Infested",unknown="Unknown"}
-function K.class_damage(tracker,scope,class)
- local m={overall={},armour={},enemy={},weapon={}};local weapons,armour,enemies={}, {}, {}
- for _,row in pairs(tracker.data.rows or {})do local c=row.context or {}
-  if not row.aggregate and c.class==class and c.mode==scope.mode and (not scope.patch or c.patch==scope.patch)then
-   for _,k in ipairs(KINDS)do local id=k[1];local n=row.best and row.best[id]
-    if n and n>0 and not (id=="single_hit"and tracker:is_class_grenade(c))then
-     local src=row.best_weapons and row.best_weapons[id]or c;local old=m.overall[id]
-     if not old or n>old.value then m.overall[id]={value=n,class=src.class or class,weapon=src.weapon,enemy=src.enemy,run=row.best_runs and row.best_runs[id]}end
-     if c.weapon then local w=weapons[c.weapon]or {id=c.weapon,cat=c.category,rec={}};weapons[c.weapon]=w;if not w.rec[id]or n>w.rec[id].value then w.rec[id]={value=n,run=row.best_runs and row.best_runs[id]}end end
-    end
-   end
-   for a,bucket in pairs(row.armour_best or {})do for _,k in ipairs(KINDS)do local n=bucket.best and bucket.best[k[1]]
-    if n and n>0 then armour[a]=armour[a]or {};if not armour[a][k[1]]or n>armour[a][k[1]].value then armour[a][k[1]]={value=n}end end end end
-   for enemy,hit in pairs(row.enemy_hits or {})do if type(hit)=="table"and (hit.damage or 0)>0 and (not enemies[enemy]or hit.damage>enemies[enemy].damage)then enemies[enemy]=hit end end
-  end
- end
- for _,a in ipairs(Nav.armours)do if armour[a]then m.armour[#m.armour+1]={label=K.armour_names[a]or a,rec=armour[a]}end end
- local groups={};for _,e in pairs(Enemies.catalog())do groups[e.label]=e.group end
- local order={normal=1,elite=2,special=3,boss=4};local names={normal="Trash Enemies",elite="Elites",special="Specials",boss="Bosses"}
- for enemy,hit in pairs(enemies)do local g=groups[enemy];m.enemy[#m.enemy+1]={label=tostring(enemy),group=names[g]or "Other",order=order[g]or 9,hit=hit}end
- table.sort(m.enemy,function(a,b)if a.order~=b.order then return a.order<b.order end;return a.label<b.label end)
- for _,w in pairs(weapons)do w.label=K.weapon(w.id);m.weapon[#m.weapon+1]=w end
- table.sort(m.weapon,function(a,b)if a.cat~=b.cat then return tostring(a.cat)<tostring(b.cat)end;return a.label<b.label end)
  return m
 end
 -- deaths: his grouping of what downed or killed the player

@@ -43,7 +43,7 @@ local function basis()local options=mod.io_display_options and mod.io_display_op
 local function clear_time(run)
  local t=run.victory and Times.completion(run);if not t or type(t.seconds)~="number"then return nil end
  if t.source=="mission_clock"then
-  local marks=run.completion_markers or {};local chosen=basis()=="boss"and marks.boss_death or marks.victory_request or marks.victory_transition
+  local marks=run.completion_markers or {};local chosen=basis()=="boss"and Times.boss_death(run)or marks.victory_request or marks.victory_transition or marks.win_condition~=marks.boss_death and marks.win_condition
   return chosen and Times.marker(run,chosen)or nil
  end
  return t.seconds
@@ -59,7 +59,20 @@ function O.defaults(tracker)
  local runs=O.runs(tracker);local patches=Nav.patches(tracker)
  -- pages start on the Preferred Mode while it has any missions, otherwise, or when it is Last Game, on the mode last played
  local mode=Nav.modes()[1];local has=mod:get("preferred_mode")~="last";if has then has=false;for _,run in ipairs(runs)do if run.context.mode==mode then has=true;break end end end
- return {mode=has and mode or runs[1]and runs[1].context.mode or mode,diff="all",patch=patches[#patches],all_patches=true}
+ local d={mode=has and mode or runs[1]and runs[1].context.mode or mode,diff="all",patch=patches[#patches],all_patches=true}
+ -- the Mode, Difficulty and Patch last picked come back, each only while it still has missions, the patch only while it is still kept
+ local kept=mod:get("io_last_scope")
+ -- a Preferred Mode changed in Settings since the last open wins over the mode picked before it
+ local pref=tostring(mod:get("preferred_mode"));local seen=mod:get("io_last_scope_pref")
+ if seen~=pref and mod.set then if seen~=nil and type(kept)=="table"then kept={patch=kept.patch,all_patches=kept.all_patches};mod:set("io_last_scope",kept)end;mod:set("io_last_scope_pref",pref)end
+ if type(kept)=="table"then
+  local mode_ok,diff_ok=false,kept.diff=="all"
+  for _,run in ipairs(runs)do if run.context.mode==kept.mode then mode_ok=true;if not diff_ok and O.diff_label(run.context)==kept.diff then diff_ok=true end end end
+  if mode_ok then d.mode=kept.mode;d.diff=diff_ok and kept.diff or "all"end
+  for _,p in ipairs(patches)do if p==kept.patch then d.patch=p end end
+  if type(kept.all_patches)=="boolean"then d.all_patches=kept.all_patches end
+ end
+ return d
 end
 function O.build(tracker,scope)
  local all=O.runs(tracker);local mode,patch=scope.mode,scope.patch

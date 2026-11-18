@@ -10,6 +10,7 @@ local FriendStats=mod:io_dofile(base.."friend_stats")
 local S=mod:io_dofile(base.."scoreboard")
 local Screens=mod:io_dofile(base.."io_page_screens")
 local Backup=mod:io_dofile(base.."statistics_backup")
+local Icons=mod:io_dofile(base.."io_icons")
 local C,F=D.c,D.font
 local X,W=D.left,D.width
 local RX=X+W-27
@@ -20,11 +21,11 @@ local function popup(title,body,label,fn)
  Managers.event:trigger("event_show_ui_popup",{title_text_unlocalized=title,description_text_unlocalized=body,
   options={{text=label,no_localization=true,close_on_pressed=true,callback=function()if mod.io_current()then fn()end end},{text="Cancel",no_localization=true,close_on_pressed=true,hotkey="back"}}})
 end
-local function row(view,cv,y,title,desc,msg,ctl,indent)
+local function row(view,cv,y,title,desc,msg,ctl,indent,dim)
  local x=X+(indent or 0);cv:rect(X+1,y,W-14,1,C.line,true)
  local lines=type(desc)=="table"and desc or desc and P.wrap(view,desc,14,1000,F.medium)or {}
  local sub=#lines>0 or msg~=nil
- cv:text(title,x+36,y+(sub and 8 or 0),700,sub and 24 or 55,indent and 14 or 16,indent and C.label or C.value)
+ cv:text(title,x+36,y+(sub and 8 or 0),700,sub and 24 or 55,indent and 14 or 16,dim and C.muted or indent and C.label or C.value)
  local ty=y+30
  for i,l in ipairs(lines)do cv:text(l,x+36,ty,1000,22,14,i==lines.hi and C.value or C.muted,"left",F.medium);ty=ty+22 end
  if msg then cv:text("“"..msg.."”",x+36,ty,900,22,14,C.label,"left",F.medium);ty=ty+22 end
@@ -32,11 +33,13 @@ local function row(view,cv,y,title,desc,msg,ctl,indent)
  if ctl then ctl(y,h)end
  return h
 end
-local function toggle(view,cv,on,fn)return function(y,h)P.toggle(view,cv,RX-46,y+math.floor((h-24)/2),on,fn)end end
+-- a shut switch wears the lock a shut tab does
+local function toggle(view,cv,on,fn,shut)return function(y,h)local ty=y+math.floor((h-24)/2);P.toggle(view,cv,RX-46,ty,on,fn,shut)
+ if shut then cv:icon(Icons.lock,RX-68,ty+5,C.muted,nil,14)end end end
 local function button(view,cv,w,label,fn,o)return function(y,h)P.button(view,cv,RX-w,y+math.floor((h-34)/2),w,34,label,fn,o)end end
 local function note(cv,y,text)cv:text(text,X+36,y,1100,22,14,C.muted,"left",F.medium)end
 local function display(view,cv,popup_cv,y)
- local o=opts();local rows={}
+ local o=opts()
  local h=45
  local fmt={{value="compact",label="Compact K/M"},{value="separators",label="Full Numbers"}}
  local cur=o.numbers=="separators"and "separators"or "compact";for _,v in ipairs(fmt)do v.current=cur end
@@ -60,6 +63,27 @@ local function display(view,cv,popup_cv,y)
  return h+10,"Display"
 end
 -- a screen's own rows, drawn from what its module lists; a row's default stands until it is changed
+-- Minute By Minute's picture, 232 by 74 left of its switch: on, a bar a minute of damage over kills with a death marked at its time; off, the two lanes
+local CLK={gold={204,221,183,99},kills={115,169,191,153},rust={255,196,96,64},line={255,60,78,57},value={255,216,229,207},label={255,169,191,153},back={230,4,7,5},hole={255,4,7,5}}
+local CDMG,CKIL={4,7,9,6,8,10,7,9,11,8,6,9,12,10,8,9},{3,4,5,3,4,6,4,5,6,4,3,5,6,5,4,5}
+local function clock_picture(cv,x,y,on)
+ cv.z=4;cv:rect(x,y,232,74,CLK.back);cv:rect(x,y,232,1,CLK.line);cv:rect(x,y+73,232,1,CLK.line);cv:rect(x,y,1,74,CLK.line);cv:rect(x+231,y,1,74,CLK.line)
+ cv.z=5
+ if on then local x0,bw,base=x+10,13,y+50
+  cv:rect(x0,base,bw*16,1,CLK.line)
+  for i,v in ipairs(CDMG)do cv:rect(x0+(i-1)*bw+1,base-v*3.2,bw-2,v*3.2,CLK.gold)end
+  for i,v in ipairs(CKIL)do cv:rect(x0+(i-1)*bw+1,base+1,bw-2,v*1.6,CLK.kills)end
+  local dx=x0+11*bw+bw/2;cv:rect(dx-.6,y+8,1.2,base+10-(y+8),CLK.rust);cv:circle(dx,y+8,3.4,CLK.rust)
+  cv:text("11:40 · Crusher",dx-130,y+2,124,14,10,CLK.value,"right",F.body)
+  cv:text("0:00",x0,y+61,60,12,10,CLK.label,"left",F.body);cv:text("15:00",x0+bw*16-60,y+61,60,12,10,CLK.label,"right",F.body)
+ else
+  for _,l in ipairs({{26,"You"},{52,"Teammates"}})do cv:text(l[2],x+10,y+l[1]-7,60,14,10,CLK.label,"left",F.body);cv:rect(x+70,y+l[1],150,1,CLK.line)end
+  local function ring(px,py)cv:circle(x+px,y+py,3.6,CLK.gold);cv.z=6;cv:circle(x+px,y+py,2.2,CLK.hole);cv.z=5 end
+  ring(118,26);cv:circle(x+196,y+26,3.6,CLK.rust);ring(92,52);ring(150,52);cv:circle(x+171,y+52,3.6,CLK.rust)
+  cv:text("0:00",x+70,y+61,60,12,10,CLK.label,"left",F.body);cv:text("15:00",x+160,y+61,60,12,10,CLK.label,"right",F.body)
+ end
+end
+local PICTURES={clock=clock_picture}
 local function screen_rows(view,cv,popup_cv,y,h,id,skip)
  local m=mod.io_screens and mod.io_screens[id]
  if not m then if not skip then note(cv,y+h+8,"Nothing to set here yet.");h=h+38 end;return h end
@@ -67,6 +91,9 @@ local function screen_rows(view,cv,popup_cv,y,h,id,skip)
   if r.kind=="select"then local list,shown={},tostring(v)
    for _,c in ipairs(r.choices or {})do list[#list+1]={value=c.value,label=c.label,current=v};if c.value==v then shown=c.label end end
    h=h+row(view,cv,y+h,r.label,r.help,nil,function(ry)P.select(view,cv,popup_cv,"set_"..r.key,RX-280,ry+14,280,shown,list,function(x)mod:set(r.key,x,true)end)end)
+  elseif r.picture and PICTURES[r.picture]then local sw=toggle(view,cv,v==true,function()mod:set(r.key,v~=true,true)end)
+   -- the help wraps short of the picture, which stands left of the switch
+   h=h+row(view,cv,y+h,r.label,P.wrap(view,r.help,14,620,F.medium),nil,function(ry,rh)PICTURES[r.picture](cv,RX-46-20-232,ry+math.floor((rh-74)/2),v==true);sw(ry,rh)end)
   else h=h+row(view,cv,y+h,r.label,r.help,nil,toggle(view,cv,v==true,function()mod:set(r.key,v~=true,true)end))end
  end end
  return h
@@ -74,15 +101,15 @@ end
 local NAME={};for _,s in ipairs(Screens.list)do NAME[s.id]=s.name end
 local function screen_tab(id)return function(view,cv,popup_cv,y)return screen_rows(view,cv,popup_cv,y,45,id)+10,NAME[id]end end
 local function endscreen(view,cv,popup_cv,y)
- local rating=mod:get("hide_match_rating")==true;local h=screen_rows(view,cv,popup_cv,y,45,"endscreen",{})
+ local rating=mod:get("hide_mission_rating")~=false;local h=screen_rows(view,cv,popup_cv,y,45,"endscreen",{})
  h=h+row(view,cv,y+h,"Hide Mission Rating","Hides the thumbs up and down on the end screen that ask you to rate the mission.",nil,
-  toggle(view,cv,rating,function()mod:set("hide_match_rating",not rating,true)end))
+  toggle(view,cv,rating,function()mod:set("hide_mission_rating",not rating,true)end))
  local E=mod.io_screens and mod.io_screens.endscreen
  if E and E.KEEP then local m,K=E.keep_minutes(),E.KEEP
   -- wrapped short of the slider and the minutes named left of it
-  local help=P.wrap(view,"How long the end screen stays up unless you press Continue. At 1 Minute it goes on when the game says, as normal. Kept up longer, the mission's server moves on without you and a loading screen takes you straight back to the Mourningstar on your own.",14,700,F.medium)
-  h=h+row(view,cv,y+h,"Keep The End Screen Up",help,nil,function(ry,rh)
-   P.slider(view,cv,"endscreen_keep_up_minutes",RX-220,ry+math.floor((rh-24)/2),220,m,K.min,K.max,P.plural(m,"Minute"),function(v)mod:set("endscreen_keep_up_minutes",v,true)end)end)
+  local help=P.wrap(view,"Keeps the end of mission 'Debrief' screen from automatically ending after 1 minute. 0 keeps it up indefinitely. If kept open beyond approx 2 minutes, the server will give up from trying to add you back into your strike team.",14,700,F.medium)
+  h=h+row(view,cv,y+h,"Prolong End Screen",help,nil,function(ry,rh)
+   P.slider(view,cv,"endscreen_keep_up_minutes",RX-220,ry+math.floor((rh-24)/2),220,m,K.min,K.max,m==0 and "Indefinite"or P.plural(m,"Minute"),function(v)mod:set("endscreen_keep_up_minutes",v,true)end)end)
  end
  return h+10,NAME.endscreen
 end
@@ -150,7 +177,7 @@ local function scoreboard(view,cv,popup_cv,y)
   P.select(view,cv,popup_cv,"set_scoreboard_end",RX-280,ry+14,280,eshown,elist,function(v)mod:set("scoreboard_end_layout",v,true)end)end)
  peek(view,cv,"set_scoreboard_end",o.end_layout,y+h,rh);h=h+rh
  h=h+row(view,cv,y+h,"Extra Stats","Adds boss damage, weakspots hit, critical hits and kills by kind to the Squad Table and Squad Cards.",nil,toggle(view,cv,o.extra,function()mod:set("scoreboard_extra",not o.extra,true)end))
- h=places(view,cv,y,h,o,{{"squad","Squad Position","held"}})
+ h=places(view,cv,y,h,o,{{"squad","Scoreboard Position","held"}})
  h=screen_rows(view,cv,popup_cv,y,h,"scoreboard",{scoreboard_layout=true,scoreboard_end_layout=true})
  return h+10,NAME.scoreboard
 end
@@ -162,6 +189,11 @@ local function tracker_tab(view,cv,popup_cv,y)
  h=h+row(view,cv,y+h,"While Dead","'Tracker Panel' while you wait to be rescued.",nil,toggle(view,cv,o.dead,function()mod:set("scoreboard_dead",not o.dead,true)end))
  h=h+row(view,cv,y+h,"On The End Screen","The Tracker Panel above the squad when the key is held on the End Screen.",nil,toggle(view,cv,o.end_tm,function()mod:set("scoreboard_end_tm",not o.end_tm,true)end))
  h=places(view,cv,y,h,o,{{"tm","Tracker Panel Position","held"},{"tm_esc","Tracker Panel Position In The Esc Menu","esc"}})
+ do local sw,sh=view:_screen();local get=function(k)return mod:get(k)end;local _,_,f=S.tab_slot(sw,sh,get);local v=math.floor(100*f+.5);local K=S.TAB_SIZE
+  h=h+row(view,cv,y+h,"Tracker Panel Size On Overlay",P.wrap(view,"How big the Tracker Panel shows with the held overlay open.",14,620,F.medium),nil,function(ry,rh)
+   P.slider(view,cv,"scoreboard_tab_size",RX-220,ry+math.floor((rh-24)/2),220,math.max(K.min,math.min(K.max,v)),K.min,K.max,(S.tab_size(get)and "" or "Fits, ")..v.."%",function(n)mod:set("scoreboard_tab_size",n,true)end)
+   P.button(view,cv,RX-480,ry+math.floor((rh-34)/2),90,34,"Reset",function()mod:set("scoreboard_tab_size",nil,true)end,{dis=not S.tab_size(get)})end)
+ end
  h=screen_rows(view,cv,popup_cv,y,h,"tracker",{scoreboard_this_mission=true,scoreboard_esc=true,scoreboard_dead=true,scoreboard_end_tm=true})
  return h+10,NAME.tracker
 end
@@ -187,12 +219,14 @@ local function tracked_players(view,cv,popup_cv,y,tracker)
  cv:text("Teammates From Your Last Missions",X+36,y+h+4,600,26,16,C.gold);h=h+32
  local seen,recent={},{}
  for _,run in ipairs(tracker and Overview.runs(tracker)or {})do if #recent>=8 then break end
+  local team={}
   for _,p in pairs(run.context.operative_roster or {})do local id=I.key(p)
-   if id and not p.personal and not seen[id]and I.lookup(tracked,id)==nil and #recent<8 then local name=I.lookup(aliases,id)or p.steam_name or p.friend_name or p.name
-    if type(name)=="string"and name~=""then seen[id]=true;recent[#recent+1]={id=id,name=name,cls=p.class,run=run}end end
+   if id and not p.personal and not seen[id]and I.lookup(tracked,id)==nil then local name=I.lookup(aliases,id)or p.steam_name or p.friend_name or p.name
+    if type(name)=="string"and name~=""then seen[id]=true;team[#team+1]={id=id,name=name,cls=p.class,run=run}end end
   end
+  table.sort(team,function(a,b)if a.name~=b.name then return a.name<b.name end;return a.id<b.id end)
+  for _,r in ipairs(team)do if #recent<8 then recent[#recent+1]=r end end
  end
- table.sort(recent,function(a,b)return tostring(a.run.started_at)>tostring(b.run.started_at)end)
  if #recent==0 then cv:rect(X+1,y+h,W-14,1,C.line,true);note(cv,y+h+8,"Unnamed teammates are left out.");h=h+40 end
  -- Steam friends are always kept, so they show as Friend rather than offering Track
  for _,r in ipairs(recent)do local on=I.lookup(tracked,r.id)~=nil;local friend=people[r.id]and people[r.id].friend
@@ -200,6 +234,20 @@ local function tracked_players(view,cv,popup_cv,y,tracker)
    friend and button(view,cv,110,"Friend",nil,{sel=true})or button(view,cv,110,on and "Tracked"or "Track",function()mod.io_friend_action(r.id,on and "untrack"or "track",r.name)end,{sel=on}))
  end
  return h+10,"Tracked Players"
+end
+-- the board and Let Teammates Start Your Assignment on until turned off, Auto-Claim Weekly Rewards off until turned on; the two under the board
+-- act only while it runs, so they are dimmed and shut while it is off
+local UNDER_BOARD={{"havoc_allow_remote_start","Let Teammates Start Your Assignment","Teammates on the Havoc Board can start the mission vote on your Assignment once you have voted for it yourself.",true},
+ {"havoc_auto_claim","Auto-Claim Weekly Rewards","Claims your Havoc weekly reward cache for you when you reach the Mourningstar.",false}}
+local function havoc_board(view,cv,popup_cv,y)
+ -- with the Havoc screen off on the Screens tab the board and the two under it are shut too
+ local screen=Screens.on("havoc");local board=mod:get("havoc_board")~=false;local live=board and screen
+ local h=45+row(view,cv,y+45,"Havoc Board","Shares your Havoc Assignment and votes with Strike Team members running I/O, and shows you theirs.",nil,
+  toggle(view,cv,board,function()mod:set("havoc_board",not board,true)end,not screen),nil,not screen)
+ for _,r in ipairs(UNDER_BOARD)do local v=mod:get(r[1]);local on=v==true or v==nil and r[4]
+  h=h+row(view,cv,y+h,r[2],r[3],nil,toggle(view,cv,on,function()mod:set(r[1],not on,true)end,not live),nil,not live)
+ end
+ return h+10,NAME.havoc
 end
 local function recording(view,cv,y)
  local blo=mod:get("capture_blo")~=false
@@ -239,7 +287,7 @@ return function(view,cv,popup_cv)
  local noop=function()end;local ghost=setmetatable({_jump=noop,_hit=noop,_ctl=noop},{__index=view})
  local function card(fn,y,...)local h,title=fn(ghost,D.canvas(),D.canvas(),y,...);view:_card(cv,X,y,W,h,title);cv.z=5;fn(view,cv,popup_cv,y,...);return h end
  local y=D.top
- local tab=part=="display"and display or part=="counting"and counting or part=="scoreboard"and scoreboard or part=="tracker"and tracker_tab or part=="endscreen"and endscreen or NAME[part]and screen_tab(part)
+ local tab=part=="display"and display or part=="counting"and counting or part=="scoreboard"and scoreboard or part=="tracker"and tracker_tab or part=="endscreen"and endscreen or part=="havoc"and havoc_board or NAME[part]and screen_tab(part)
  if tab then card(tab,y)
  elseif part=="tracked"then card(tracked_players,y,tracker)
  else

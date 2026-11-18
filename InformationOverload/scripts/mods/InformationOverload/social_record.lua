@@ -3,7 +3,8 @@ local mod=get_mod("information_overload")
 local base="InformationOverload/scripts/mods/InformationOverload/"
 local Overview=mod:io_dofile(base.."io_overview")
 local Records=mod:io_dofile(base.."records")
-local Team=mod:io_dofile(base.."team_damage")
+local Warm=mod:io_dofile(base.."warm_parts")
+local I=mod:io_dofile(base.."player_identity")
 local R={}
 local commas=Overview.commas
 local function cname(id)return Overview.class_names[id]or Records.class_name(id)end
@@ -32,17 +33,12 @@ local function where(tracker,run)return run and run.context and tracker.run_miss
 -- Kept on mod, as io_dofile reruns this file and the hub reads them ahead for the screen.
 mod.io_social_heavy=mod.io_social_heavy or setmetatable({},{__mode="k"})
 local heavy=mod.io_social_heavy
-local function decode(run)
- local h={};local d=run.damage
- if type(d)=="table"then for _,slot in ipairs({"melee","ranged"})do local g=d[slot];if type(g)=="table"then local n=0
-  for a,b in pairs(g)do if a~="all"and a~="void_shield"and type(b)=="table"then n=n+(tonumber(b.total)or 0)end end;h[slot]=n end end end
- local t=run.team_damage;if type(t)=="table"then h.members={};for id in pairs(t.members or {})do h.members[tostring(id)]=Team.summary(t,id,"total").useful end end
- return h
-end
--- reads at most one uncached run per call and says how many of the list are ready
+local decode=Warm.social
+-- takes in every match that keeps its totals, reads at most one other match's file a call, and says how many of the list are ready
 function R.warm(runs)
  local done,read=0,false
- for _,run in ipairs(runs)do if heavy[run]then done=done+1 elseif not read then read=true;local ok,h=pcall(decode,run);if not ok and not R.told then R.told=true;mod:error("I/O social record, match %s: %s",tostring(run.id),tostring(h))end;heavy[run]=ok and h or {};done=done+1 end end
+ for _,run in ipairs(runs)do local kept=not heavy[run]and Warm.saved(run,"social");if kept then heavy[run]=kept end
+  if heavy[run]then done=done+1 elseif not read then read=true;local ok,h=pcall(decode,run);if not ok and not R.told then R.told=true;mod:error("I/O social record, match %s: %s",tostring(run.id),tostring(h))end;heavy[run]=ok and h or {};done=done+1 end end
  return done,#runs
 end
 
@@ -81,6 +77,7 @@ function R.mate(tracker,runs,who)
  for i=#runs,1,-1 do local run=runs[i];local c=run.context or {};local keys,row,cl={},nil,nil
   for k,p in pairs(c.operative_roster or {})do if matches(p,who)then keys[tostring(k)]=true;row=row or p end end
   for k,p in pairs(run.operative_clutches or {})do if matches(p,who)then keys[tostring(p.character_id or k)]=true;cl=cl or p;row=row or p end end
+  for _,p in pairs(I.team_accounts(tracker and tracker.data,c))do if matches(p,who)then row=row or p end end
   if row then local won=run.victory==true;chrono[#chrono+1]=run
    m.games=m.games+1;if won then m.wins=m.wins+1 end
    local name=type(row.name)=="string"and row.name~=""and row.name;if name then local n=bump(m.names,m.nlist,name);n[2]=n[2]+1 end
@@ -186,7 +183,9 @@ local function names(list)
  if #n==1 then return n[1]end;return table.concat(n,", ",1,#n-1).." and "..n[#n]
 end
 -- the lines of your record with a teammate; best is their best damage run, or nil while the match files are read
+-- the account name as plain words: the engine would read {# in it as markup and draw it past its fitted room
 function R.mate_page(m,acct,best,k)
+ acct=tostring(acct or "");local n;repeat acct,n=acct:gsub("{#","{")until n==0
  local w=pen()
  w.t("In Your Strike Team",786,308,1000,23,19,C.label);w.t(acct,786,334,1000,40,32,C.white)
  if #m.nlist>0 then w.t("Played with you as "..names(m.nlist),786,374,1026,20,16,C.label,"l","m")end

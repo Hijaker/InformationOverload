@@ -9,7 +9,7 @@ local function master_items()
 end
 local Parser=require("scripts/ui/views/talent_builder_view/utilities/talent_layout_parser")
 local function valid(s) return type(s)=="string" and s~="" and not s:find("<unlocalized",1,true) end
--- a description keeps the game's colour codes for the Builds page; one that is only codes is no text
+-- a description keeps the game's colour codes for the Build page; one that is only codes is no text
 local function shown(s) return valid(s) and valid((s:gsub("{#[^}]*}",""))) and s or nil end
 local function item_name(item)
     if type(item)~="table" then return end
@@ -72,10 +72,20 @@ function L.capture(profile)
         local weapon=key=="melee" or key=="ranged"
         result[key.."_blessings"]=blessings(item,not weapon)
         result[key.."_perks"]=perks(item,weapon)
-        if weapon then result[key.."_perk_details"]=perks(item) end
+        if weapon then
+            result[key.."_perk_details"]=perks(item)
+            result[key.."_template"]=type(item)=="table"and item.weapon_template or nil
+            -- each blessing as the game keeps it, so the Build page can give its text in the game's current words
+            if type(item)=="table" and type(item.traits)=="table" then
+                local traits={}
+                for _,trait in ipairs(item.traits) do if type(trait.id)=="string" then traits[#traits+1]={id=trait.id,rarity=trait.rarity,value=trait.value} end end
+                if #traits>0 then result[key.."_traits"]=traits end
+            end
+        end
     end
     local archetype=profile.archetype
     if type(archetype)~="table" then return result end
+    if type(archetype.name)=="string" then result.archetype=archetype.name end
     local definitions=archetype.talents or {};local selected=profile.selected_nodes or {};local choices, talents, captured={},{},{}
     do
         local layouts=Parser.archetype_layouts(archetype)
@@ -121,6 +131,58 @@ function L.capture(profile)
     end)
     if #talents>0 then result.talents=talents end
     return result
+end
+-- a saved blessing's text as the game words it now, or nil while the game can't say
+function L.trait_text(trait)
+    if type(trait)~="table" or type(trait.rarity)~="number" then return end
+    local definitions=master_items();local definition=definitions and definitions[trait.id]
+    if not definition then return end
+    local ok,text=pcall(Items.trait_description,definition,trait.rarity,trait.value or 0)
+    return ok and shown(text) or nil
+end
+-- a match saved before blessing ids were kept has only "Wrath IV": the weapon's name gives its family, and that family's blessing of that name is the one
+local NUMERAL={I=1,II=2,III=3,IV=4}
+local weapon_templates,family_traits=nil,{}
+local function template_of(name)
+    if not weapon_templates then
+        local definitions=master_items();if not definitions then return end
+        weapon_templates={}
+        -- a player's weapon wins its name over any other item called the same
+        for id,item in pairs(definitions) do
+            if type(item)=="table" and type(item.weapon_template)=="string" and (item.item_type=="WEAPON_MELEE" or item.item_type=="WEAPON_RANGED") then
+                local main=tostring(id):find("^content/items/weapons/player/")~=nil
+                local label=item_name(item);if label and (main or not weapon_templates[label]) then weapon_templates[label]=item.weapon_template end
+            end
+        end
+    end
+    return weapon_templates[name]
+end
+local function traits_of(family)
+    local found=family_traits[family];if found then return found end
+    local definitions=master_items();if not definitions then return end
+    found={};local prefix="content/items/traits/bespoke_"..family.."/"
+    for id,item in pairs(definitions) do
+        if type(id)=="string" and id:sub(1,#prefix)==prefix then local label=item_name(item);if label then found[label]=found[label] or id end end
+    end
+    family_traits[family]=found;return found
+end
+-- each saved blessing of a weapon slot as {id, rarity, value}, in the order its names are listed; one the game can't be matched to is left out
+function L.blessing_refs(snapshot,slot)
+    local saved=snapshot[slot.."_traits"]
+    if type(saved)=="table" and #saved>0 then return saved end
+    local refs,names={},{}
+    for part in (tostring(snapshot[slot.."_blessings"] or "")..","):gmatch("(.-),") do part=part:match("^%s*(.-)%s*$");if part~="" and part~="None" then names[#names+1]=part end end
+    if #names==0 or type(snapshot[slot])~="string" then return refs end
+    local template=snapshot[slot.."_template"] or template_of(snapshot[slot])
+    local family=type(template)=="string" and template:gsub("_m%d+$","") or nil
+    local traits=family and traits_of(family)
+    if not traits then return refs end
+    for i,name in ipairs(names) do
+        local label,numeral=name:match("^(.-)%s+([IV]+)$")
+        local id=traits[label or name]
+        if id then refs[i]={id=id,rarity=NUMERAL[numeral] or 4,value=1} end
+    end
+    return refs
 end
 function L.lines(name,snapshot)
     snapshot=snapshot or {};local lines={"{#color(221,183,99)}"..name.."{#reset()}",""}

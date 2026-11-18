@@ -57,14 +57,14 @@ local function events(run)
  return out
 end
 local function mate(c,id,p)return type(p)=="table"and not p.personal and tostring(id)~=tostring(c.character)and I.key(p)end
--- every counted mission by map, newest first, and each teammate's record with you over all maps; read once per history
+-- every counted mission by map, newest first, and each teammate's record with you over all maps; read once per history, with the ids the history ties to a Steam id learned first
 function B.index(tracker)
- local maps,people={},{}
+ I.learn(tracker.data);local maps,people={},{}
  for _,run in ipairs(Overview.runs(tracker))do local c=run.context;local key=c.mission_name
   if key then local l=maps[key];if not l then l={};maps[key]=l end;l[#l+1]=run end
   local seen,slot={},run.victory and 1 or 2
-  for id,p in pairs(c.operative_roster or {})do local k=mate(c,id,p)
-   if k and not seen[k]then seen[k]=true;local x=people[k];if not x then x={0,0};people[k]=x end;x[slot]=x[slot]+1 end end
+  for _,set in ipairs({c.operative_roster or {},I.team_accounts(tracker.data,c)})do for id,p in pairs(set)do local k=mate(c,id,p)
+   if k and not seen[k]then seen[k]=true;local x=people[k];if not x then x={0,0};people[k]=x end;x[slot]=x[slot]+1 end end end
  end
  return {maps=maps,people=people,tracker=tracker}
 end
@@ -75,8 +75,8 @@ function B.map(index,key,basis)
  local byp,mates={},{}
  for _,run in ipairs(list)do local c=run.context;local ev=events(run);local time,backend=clear(run,basis)
   m.runs[#m.runs+1]={date=day(run.started_at),diff=B.diff(c),cls=cls(c.class),won=run.victory==true,time=time,backend=backend,dmg=damage(run),tracked=ev~=nil,events=ev or {},partial=run.full==false}
-  if run.victory then for id,p in pairs(c.operative_roster or {})do local k=mate(c,id,p)
-   if k and not byp[k]then local x={who=p.steam_name or p.friend_name or p.name or "Steam Name Unavailable",cls=cls(p.class),all=index.people[k]or {0,0}};byp[k]=x;mates[#mates+1]=x end end end
+  if run.victory then for _,set in ipairs({c.operative_roster or {},I.team_accounts(index.tracker.data,c)})do for id,p in pairs(set)do local k=mate(c,id,p)
+   if k and not byp[k]then local x={who=p.steam_name or p.friend_name or p.name or "Steam Name Unavailable",cls=p.class and cls(p.class)or DASH,all=index.people[k]or {0,0}};byp[k]=x;mates[#mates+1]=x end end end end
  end
  table.sort(mates,function(a,b)if a.all[1]~=b.all[1]then return a.all[1]>b.all[1]end;if a.all[2]~=b.all[2]then return a.all[2]<b.all[2]end
   local x,y=a.who:lower(),b.who:lower();if x~=y then return x<y end;return a.who<b.who end)

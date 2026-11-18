@@ -48,7 +48,8 @@ return function(mod,api,C,D)
         boss_identity_cache[unit]={id=id,label=label,weakened=weakened,token=boss_token(unit)}
         if api.tracker():boss_defeated(id,label,boss_token(unit),weakened) then api.save() end
     end
-    mod:hook_safe("MinionDeathManager","set_dead",function(_,unit,_,_,profile_name)boss_death(unit,profile_name)end)
+    -- DMF takes one hook a mod per function, so the Support page's pinned saves hear of each death here too
+    mod:hook_safe("MinionDeathManager","set_dead",function(_,unit,_,_,profile_name)if C.support then C.support.dead(unit)end;boss_death(unit,profile_name)end)
     local function boss_report_credit(target,attacker,profile,result)
         if not api.enabled()or result~="died"or not attacker or not live_context()then return end
         local m=api.tracker().mission;if not m then return end
@@ -93,7 +94,9 @@ return function(mod,api,C,D)
         end
         if target then credited_kills[target]=true end
         if enemy then local data,t=timeline();if data then Timeline.kill(data,t)end end
+        local m=api.tracker().mission;local before=m and m.kills
         api.tracker():kill_credit(c,category,b and Grouping.trash_ranged(b.name,b.ranged,last_enemy_attack[target]));
+        if m and m.kills~=before and D.kill_minute then D.kill_minute(m,attacker)end
         if not b then
             
 

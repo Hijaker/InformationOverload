@@ -15,10 +15,10 @@ function F.backend(run)
 end
 function F.completion(run)return F.backend(run)or run.completion_time end
 local function partial40(run)local c=run.context or {};return run.full==false and c.mode=="havoc"and tonumber(c.difficulty)==40 end
--- a backend time counts only for a run the clock or a typed time could count for, and never for one Counting leaves out
+-- a backend time counts only for a run the clock or a typed time could count for, and neither counts for one Counting leaves out
 function F.counts(run,t)
  if t.source=="backend"then return (run.full==true or partial40(run))and not run.stats_excluded end
- return run.full==true and t.source=="mission_clock"or t.source=="manual"and partial40(run)
+ return run.full==true and t.source=="mission_clock"or t.source=="manual"and partial40(run)and not run.stats_excluded
 end
 -- of one map's clears, one the server timed ranks ahead of one the mission clock or a typed time gave, as their seconds cannot be compared
 function F.faster(a,b)
@@ -26,13 +26,20 @@ function F.faster(a,b)
  if (x.source=="backend")~=(y.source=="backend")then return x.source=="backend"end
  return x.seconds<y.seconds
 end
+local CAPTAIN_MAPS={km_station=true,km_enforcer=true}
+function F.boss_death(run)
+ local marks=run.completion_markers or {};local c=run.context or {};local at=run.started_at
+ if c.mode=="havoc"and CAPTAIN_MAPS[c.mission_name]and type(at)=="string"and at:match("^%d%d%d%d%-%d%d%-%d%d")and at<"2026-11-04 10:19"then return nil end
+ return marks.boss_death
+end
 function F.marker(run,n)return type(n)=="number"and math.max(0,n-(run.timing_origin or 0))or nil end
 function F.build(history,mode,basis)
  local out={};local totals={}
  for _,run in ipairs(history or {})do local c=run.context or {};local t=F.completion(run)
   if t and t~=run.completion_time then run=setmetatable({completion_time=t},{__index=run})end
   if t and t.source=="mission_clock"then
-   local marks=run.completion_markers or {};local chosen=basis=="boss"and marks.boss_death or marks.victory_request or marks.victory_transition
+   -- matches saved before the victory markers keep only the win condition the clock stopped on, which times the boss basis alone when it was the boss death
+   local marks=run.completion_markers or {};local chosen=basis=="boss"and F.boss_death(run)or marks.victory_request or marks.victory_transition or marks.win_condition~=marks.boss_death and marks.win_condition
    if chosen then run=setmetatable({completion_time={seconds=F.marker(run,chosen),source="mission_clock"}},{__index=run});t=run.completion_time else t=nil end
   end
   if c.mode==mode and run.victory==true and not run.data_only and not run.discarded and not run.hidden_contributions and not c.training_history_test and t and type(t.seconds)=="number"and t.seconds>0 and t.seconds<=86400 and F.counts(run,t)then

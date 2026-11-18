@@ -24,7 +24,8 @@ function M.dropdown(view,cv,popup,id,x,y,w,label,value,options,pick)
  local open=view.dd==id
  view:_ctl(cv,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open})
  local lw=view:_w(label,16);local room=w-lw-56;local full=value
- if view:_w(value,16)>room then local s=value;while #s>1 and view:_w(s.."...",16)>room do repeat local b=s:byte(-1);s=s:sub(1,-2)until #s==0 or b<128 or b>=192 end;value=s.."..."end
+ -- cut with room to spare, as the game wraps a line a little short of the width measured
+ if view:_w(value,16)>room-10 then local s=value;while #s>1 and view:_w(s.."...",16)>room-10 do repeat local b=s:byte(-1);s=s:sub(1,-2)until #s==0 or b<128 or b>=192 end;value=s.."..."end
  cv:text(label,x+12,y,lw+4,34,16,C.label);cv:pick(full,value,x+20+lw,y,room)
  cv:chevron(x+w-24,y+13,"down",10,C.value)
  if not open then return end
@@ -107,7 +108,7 @@ end
 local function basis()local o=mod.io_display_options and mod.io_display_options()or {};return o.boss_map_timing and "boss"or "victory"end
 local function clear_time(run)
  local t=run.victory and Times.completion(run);if not t or type(t.seconds)~="number"then return nil end
- if t.source=="mission_clock"then local marks=run.completion_markers or {};local chosen=basis()=="boss"and marks.boss_death or marks.victory_request or marks.victory_transition;return chosen and Times.marker(run,chosen)or nil end
+ if t.source=="mission_clock"then local marks=run.completion_markers or {};local chosen=basis()=="boss"and Times.boss_death(run)or marks.victory_request or marks.victory_transition or marks.win_condition~=marks.boss_death and marks.win_condition;return chosen and Times.marker(run,chosen)or nil end
  return t.seconds
 end
 local zone_of
@@ -154,7 +155,8 @@ function M.history(tracker,scope)
    -- the player's own useful damage, as Most Damage In A Mission counts it, so none for a match with no squad tally
    local own=Records.run_useful(run);local reported=own;local ts=tostring(run.started_at or "")
    local day=ts:match("^(%d%d%d%d%-%d%d%-%d%d)");local dn=day_number(day)
-   local r={run=run,id=run.id,ts=ts,day=day,age=dn and today-dn or nil,map=tracker:run_mission_name(c),mapid=c.mission_name or "?",zone=zone_of(c),
+   local r={run=run,id=run.id,ts=ts,day=day,age=dn and math.floor(today-dn+.5)or nil,map=tracker:run_mission_name(c),mapid=c.mission_name or "?",zone=zone_of(c),
+    faction=({renegade="scab",scabs="scab",cultist="dreg",dregs="dreg",mixed="mixed"})[c.havoc_faction],
     diff=H.difficulty_short(c):gsub("Auric Maelstrom","Auric M."),win=run.victory==true,partial=run.full==false,cls=c.class,kills=type(run.kills)=="number"and run.kills or nil,
     dmg=reported~=nil and own or nil,secs=clear_time(run),team={},mates={},mate_rows={},tracked_mates={},mods={},mod_plain={},mod_havoc={}}
    local y,mo,d,hm=ts:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)[ T](%d%d:%d%d)");r.date=d and d.."/"..mo or DASH;r.clock=hm or ""
@@ -165,15 +167,18 @@ function M.history(tracker,scope)
      r.mates[player_key]=true;r.mate_rows[player_key]=everyone[player_key];r.tracked_mates[player_key]=known[player_key]
     end
    end end
+   -- a match from before the roster saved each teammate's class under their character name, and the oldest saved who played as account ids
+   if not next(c.operative_roster or {})and type(c.teammates)=="table"then for name,class in pairs(c.teammates)do if type(name)=="string"and name~=c.character_name and type(class)=="string"and not name:find("[BOT]",1,true)then r.team[class]=true end end end
+   for _,row in pairs(Identity.team_accounts(tracker.data,c))do local k=Identity.key(row);if everyone[k]then r.mates[k]=true;r.mate_rows[k]=everyone[k];r.tracked_mates[k]=known[k]end end
    for id,label in pairs(c.modifiers or {})do if id~="mutator_increased_difficulty"and id~="mutator_highest_difficulty"and type(label)=="string"and label~=""and not label:find("<unlocalized",1,true)then r.mods[label]=true;local parent=label:match("^(.-) %([^()]+%)$");if parent then r.mods[parent]=true else r.mod_plain[label]=true end;if havoc_modifier(id)then r.mod_havoc[parent or label]=true end end end
    out[#out+1]=r
   end
  end
  return out
 end
-function M.blank_filters()return {res="all",date="all",cls="all",team={},mods={},maps={},kinds={},players={}}end
-function M.filter_count(f)local n=0;for _,k in ipairs({"res","date","cls"})do if f[k]~="all"then n=n+1 end end;for _,k in ipairs({"team","mods","maps","kinds","players"})do if next(f[k])then n=n+1 end end;return n end
-local function kind(r)return r.partial and "partial"or "full"end
+function M.blank_filters()return {res="all",date="all",cls="all",faction="all",team={},mods={},maps={},players={}}end
+function M.filter_count(f,mode)local n=mode=="havoc"and f.faction and f.faction~="all"and 1 or 0;for _,k in ipairs({"res","date","cls"})do if f[k]~="all"then n=n+1 end end;for _,k in ipairs({"team","mods","maps","players"})do if next(f[k])then n=n+1 end end;return n end
+
 -- each filter on its own, so the panel can count what one list would leave with the others as they are
 local CHECK={
  res=function(r,f)return not (f.res=="win"and not r.win or f.res=="loss"and r.win)end,
@@ -185,10 +190,10 @@ local CHECK={
  team=function(r,f)for c in pairs(f.team)do if not r.team[c]then return false end end;return true end,
  mods=function(r,f,mode)if mode=="havoc"then for m in pairs(f.mods)do if not r.mods[m]then return false end end end;return true end,
  maps=function(r,f)return not f.maps[r.mapid]end,
- kinds=function(r,f)return not f.kinds[kind(r)]end,
+ faction=function(r,f,mode)return mode~="havoc"or not f.faction or f.faction=="all"or r.faction==f.faction end,
  players=function(r,f)for n in pairs(f.players)do if not r.mates[n]then return false end end;return true end,
 }
-local ORDER={"res","date","cls","team","mods","maps","kinds","players"}
+local ORDER={"res","date","cls","team","mods","maps","faction","players"}
 -- skip leaves one filter out
 function M.keep(r,f,mode,skip)
  for _,k in ipairs(ORDER)do if k~=skip and not CHECK[k](r,f,mode)then return false end end
@@ -213,16 +218,16 @@ local function mate_labels(rows,tracked)
  for _,r in ipairs(rows)do for k,who in pairs(r.mate_rows or {})do if labels[k]==nil then labels[k]=Roster.name(who,tracked[k],Records)end end end
  named={rows=rows,labels=labels};return labels
 end
-local function sig(f)local out={f.res,f.date,f.cls}
- for _,k in ipairs({"team","mods","maps","kinds","players"})do local keys={};for v in pairs(f[k])do keys[#keys+1]=tostring(v)end;table.sort(keys);out[#out+1]=k..":"..table.concat(keys,"\1")end
+local function sig(f)local out={f.res,f.date,f.cls,f.faction or "all"}
+ for _,k in ipairs({"team","mods","maps","players"})do local keys={};for v in pairs(f[k])do keys[#keys+1]=tostring(v)end;table.sort(keys);out[#out+1]=k..":"..table.concat(keys,"\1")end
  return table.concat(out,"\2")
 end
 function M.options(rows,mode,patch_label,f,include_remaining)
  f=f or M.blank_filters()
  local key=sig(f)..mode..patch_label..tostring(include_remaining==true)
  if last and last.rows==rows and last.key==key then return last.o end
- local base={};for _,list in ipairs({"res","date","cls","team","mods","maps","kinds","players"})do
-  local skip=(list=="res"or list=="date"or list=="cls"or list=="maps"or list=="kinds")and list or nil;local kept={}
+ local base={};for _,list in ipairs({"res","date","cls","team","mods","maps","faction","players"})do
+  local skip=(list=="res"or list=="date"or list=="cls"or list=="maps"or list=="faction")and list or nil;local kept={}
   for _,r in ipairs(rows)do if M.keep(r,f,mode,skip)then kept[#kept+1]=r end end;base[list]=kept end
  local function count(list,p)local n=0;for _,r in ipairs(base[list])do if p(r)then n=n+1 end end;return n end
  local function any(p)for _,r in ipairs(rows)do if p(r)then return true end end end
@@ -279,7 +284,12 @@ function M.options(rows,mode,patch_label,f,include_remaining)
  local zl={};for z in pairs(zones)do zl[#zl+1]=z end;table.sort(zl)
  o.maps={};for _,z in ipairs(zl)do local list={};for _,m in pairs(maps)do if m.z==z then list[#list+1]=m end end;table.sort(list,function(a,b)return a.label<b.label end)
   if z~=""then o.maps[#o.maps+1]={head=z}end;for _,m in ipairs(list)do o.maps[#o.maps+1]=m end end
- o.kinds={};for _,k in ipairs({{"full","Full"},{"partial","Partial"}})do local p=function(r)return kind(r)==k[1]end;if any(p)then o.kinds[#o.kinds+1]={v=k[1],label=k[2],n=count("kinds",p)}end end
+ o.faction={{v="all",label="All Enemy Types",n=#base.faction}}
+ if mode=="havoc"then
+  for _,option in ipairs({{"scab","Scabs"},{"dreg","Dregs"},{"mixed","Mixed"}})do
+   o.faction[#o.faction+1]={v=option[1],label=option[2],n=count("faction",function(r)return r.faction==option[1]end)}
+  end
+ end
  last={rows=rows,key=key,o=o}
  return o
 end

@@ -76,23 +76,23 @@ K.install=function(mod,api,C,Timeline,timeline,local_unit)
     local function health_snapshot(health)
         local own=local_unit()
         if not own or health._unit~=own or not api.enabled()or not api.tracker().mission then return end
-        return {damage=health:damage_taken(),permanent=health:permanent_damage_taken()}
+        return health:damage_taken(),health:permanent_damage_taken()
     end
-    local function health_changed(health,before)
-        if before and (health:damage_taken()>before.damage or health:permanent_damage_taken()>before.permanent)then
+    local function health_changed(health,damage,permanent)
+        if damage and (health:damage_taken()>damage or health:permanent_damage_taken()>permanent)then
             local data,t=timeline();if data then Timeline.reset_health(data,t,"health_loss")end
         end
     end
     local health_hook_failed=false
-    local function health_contained(ok,value)
+    local function health_contained(ok,value,extra)
         if not ok and not health_hook_failed then health_hook_failed=true;mod:error("I/O collector health: %s",tostring(value))end
-        if ok then return value end
+        if ok then return value,extra end
     end
     for _,spec in ipairs({{"PlayerUnitHealthExtension","_set_damage"},{"PlayerUnitHealthExtension","_set_permanent_damage"},{"PlayerHuskHealthExtension","fixed_update"}})do
         mod:hook(spec[1],spec[2],function(func,health,...)
-            local before=health_contained(pcall(health_snapshot,health))
+            local damage,permanent=health_contained(pcall(health_snapshot,health))
             local result=func(health,...)
-            health_contained(pcall(health_changed,health,before))
+            health_contained(pcall(health_changed,health,damage,permanent))
             return result
         end)
     end

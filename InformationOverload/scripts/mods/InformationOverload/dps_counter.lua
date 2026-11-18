@@ -3,7 +3,9 @@ function D.new()return {version=1,timeout=5,total=0,useful=0,hits=0,groups={}}en
 function D.update(s,t)if s.last and t-s.last>=s.timeout then s.finalized=true end end
 function D.hit(s,t,total,useful,category)
  if not total or total<=0 then return end
- if s.last and t-s.last>=s.timeout then s.total=0;s.useful=0;s.hits=0;s.first=nil;s.useful_unavailable=false;s.groups={}end
+ -- a pause starts a new burst; the whole session's damage, hits and time spent hitting are kept beside it in all_*
+ if s.last and t-s.last>=s.timeout then s.all_span=(s.all_span or 0)+(s.last-(s.first or s.last));s.total=0;s.useful=0;s.hits=0;s.first=nil;s.useful_unavailable=false;s.groups={}end
+ s.all_total=(s.all_total or 0)+total;s.all_hits=(s.all_hits or 0)+1
  s.first=s.first or t;s.last=t;s.finalized=false;s.total=s.total+total;s.useful=s.useful+(useful or 0);s.hits=s.hits+1;s.useful_unavailable=s.useful_unavailable or useful==nil
  local key=category or "other";s.groups=s.groups or {};local g=s.groups[key]or {total=0,useful=0};s.groups[key]=g;g.total=g.total+total;g.useful=g.useful+(useful or 0);g.useful_unavailable=g.useful_unavailable or useful==nil
 end

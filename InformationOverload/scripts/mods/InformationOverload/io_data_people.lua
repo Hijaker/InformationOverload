@@ -26,10 +26,11 @@ function P.wrap(view,text,size,width,font)
  end
  if cur~=""then lines[#lines+1]=cur end;return lines
 end
-function P.toggle(view,cv,x,y,on,fn)
+-- dis dims it and shuts it, still showing what it is set to
+function P.toggle(view,cv,x,y,on,fn,dis)
  local w,h=46,24
- view:_ctl(cv,"base",x,y,w,h,fn,{sel=on,hv={bg=C.fill_h,edge=C.hover}})
- cv.z=5;cv:rect(on and x+w-20 or x+6,y+5,14,14,on and C.gold or C.label)
+ local k=view:_ctl(cv,"base",x,y,w,h,fn,{sel=on,dis=dis,hv={bg=C.fill_h,edge=C.hover}})
+ cv.z=5;cv:rect(on and x+w-20 or x+6,y+5,14,14,on and C.gold or C.label,false,k)
 end
 -- a whole number from min to max along a track w wide, its value named to the left; pressed anywhere on it, the knob follows the pointer until let go
 function P.slider(view,cv,id,x,y,w,v,min,max,label,set)
@@ -60,7 +61,7 @@ function P.select(view,cv,popup,id,x,y,w,value,options,pick)
   if not o.dis then view:_hit("popup",x+1,oy,pw-2,30,function()view.dd=nil;pick(o.value)end,{bg=C.fill_h},nil,nil,id.."|"..tostring(o.value))end
  end
 end
-function P.open_run(view,id)return function()view.io_params=view.io_params or {};view.io_params.run=id;view.io_tab="overview";view:_go("run")end end
+function P.open_run(view,id)return function()view.io_params=view.io_params or {};view.io_params.run=id;view.io_tab="overview";if view.scroll then view.scroll.run=0 end;view:_go("run")end end
 
 local function damage(run)return (Records.run_mission_damage(run))end
 local function mode_label(c)local l=Overview.diff_label(c);return (l:gsub(" Maelstrom$",""))end
@@ -71,7 +72,6 @@ local STATS={{"mkills","Most Kills In A Mission"},{"mdmg","Most Damage In A Miss
 P.dossier_stats=STATS
 -- Most Damage is useful damage, overkill left out, as the Overview has it; the biggest hit keeps its overkill
 local function stat(run,k)
- if not run.contributions then return nil end
  local r=run.records or {}
  if k=="mkills"then return run.kills elseif k=="mdmg"then return (Records.run_useful(run))elseif k=="mboss"then return run.kill_categories and (run.kill_categories.boss or 0)or nil
  elseif k=="single"then return r.single_hit elseif k=="dodges"then return r.dodges elseif k=="head"then return r.head_combined elseif k=="kir"then return r.kills end
@@ -242,7 +242,7 @@ function P.friends(tracker,patch,mode)
   local f={id=r.id,name=r.name,info={},clutch={},enemies={}}
   f.info[#f.info+1]={"Missions Together",tostring(games)};f.info[#f.info+1]={"Wins Together",tostring(s.wins or 0)}
   f.info[#f.info+1]={"Win Rate With You",games>0 and string.format("%.1f%%",100*(s.wins or 0)/games)or DASH}
-  local best,class;for id,x in pairs(s.classes or {})do if (x.games or 0)>=5 and (not best or x.wins*best.games>best.wins*x.games or x.wins*best.games==best.wins*x.games and x.games>best.games)then best=x;class=id end end
+  local best,class;for id,x in pairs(s.classes or {})do if id~="unknown"and (x.games or 0)>=5 and (not best or x.wins*best.games>best.wins*x.games or x.wins*best.games==best.wins*x.games and x.games>best.games)then best=x;class=id end end
   f.info[#f.info+1]={"Most Successful Class",best and (Overview.class_names[class]or Records.class_name(class))or DASH}
   f.info[#f.info+1]={"Class Win Rate",best and string.format("%.1f%%",100*best.wins/best.games).." Of "..best.games or DASH}
   local cn=function(id)return Overview.class_names[id]or Records.class_name(id)end
@@ -265,12 +265,16 @@ local armour_hits=Sum.hits
 -- Kept on mod because io_dofile reruns this file for every page; the hub warm-up fills the same cache.
 mod.io_saved_armour=mod.io_saved_armour or setmetatable({},{__mode="k"})
 local saved_hits=mod.io_saved_armour
-local function saved_armour(run)local a=saved_hits[run];if not a then a=armour_hits(run);saved_hits[run]=a end;return a end
-local function dps(state)if not state or not state.first or not state.last then return end;local d=state.last-state.first;return {total=state.total or 0,hits=state.hits or 0,dur=d,wh=d>0 and (state.total or 0)/d or nil}end
+-- an unreadable match file counts as no hits, cached so it is not read again
+local function saved_armour(run)local a=saved_hits[run];if not a then local ok,h=pcall(armour_hits,run);a=ok and h or armour_hits(nil);saved_hits[run]=a end;return a end
+-- the whole session where the counter kept it (all_*), else the last burst alone, as older saves have it
+local function dps(state)if not state or not state.first or not state.last then return end;local d=(state.all_span or 0)+state.last-state.first;local tot=state.all_total or state.total or 0;return {total=tot,hits=state.all_hits or state.hits or 0,dur=d,wh=d>0 and tot/d or nil}end
+-- the first saved logs kept no loadout, only the melee weapon the session started with
+local function first_melee(c)if c.category~="melee"or not c.weapon or not mod.io_weapon_name then return end;local ok,n=pcall(mod.io_weapon_name,c.weapon);if ok and type(n)=="string"and n~=""and n~="Unknown weapon"then return n end end
 function P.bench_session(run,id,live)
  local lo=melee_of(run);local c=run.context or {};local arm=live and armour_hits(run)or saved_armour(run);local d=dps(run.psyk_dps)
  local single=run.records and run.records.single_hit
- return {id=id,live=live,run=run,weapon=lo.melee or "Unknown Weapon",blessings=lo.melee_blessings,perks=lo.melee_perks,op=c.character_name or "Unknown Operative",cls=c.class,
+ return {id=id,live=live,run=run,weapon=lo.melee or first_melee(c)or "Unknown Weapon",blessings=lo.melee_blessings,perks=lo.melee_perks,op=c.character_name or "Unknown Operative",cls=c.class,
   arm=arm,dps=d,dmg=d and d.total or arm.all.dmg,hits=d and d.hits or arm.all.n,best=single,dur=d and d.dur or 0,label=c.mission_display_name}
 end
 -- The main file keeps the summary; a page loaded without it, as the tests do, counts one here.
@@ -303,10 +307,10 @@ function P.psyk(tracker)
  end
  return out
 end
--- Decodes at most one uncached saved log per call; true once every log the tab reads is cached.
+-- Takes in every saved log that keeps its melee hits and decodes at most one other a call; true once every log the tab reads is cached.
 function P.warm()
  local logs=mod.io_psykhanium_logs and mod.io_psykhanium_logs();local hist=logs and logs.data and logs.data.run_history or {}
- for _,run in ipairs(hist)do if run.context and not saved_hits[run]then saved_armour(run);return false end end
+ for _,run in ipairs(hist)do if run.context and not saved_hits[run]then local kept=Sum.kept(run);saved_armour(run);if not kept then return false end end end
  return true
 end
 return P

@@ -31,6 +31,8 @@ return function(mod,collectors,api)
  function SB.in_mission()return live_mission()or SB.finished()~=nil end
  -- what a hold shows where the key is pressed, "off" for nothing: on the end screen (fin) its own choices, in a mission the squad's layout or else the Tracker Panel alone
  function SB.hold_layout(fin)local o=SB.options();if fin then return (board_on()and o.end_layout~="off"or tracker_on()and o.end_tm)and "end"or "off"end;if board_on()and o.layout~="off"then return o.layout end;return tracker_on()and o.this_mission and "tm"or "off"end
+ -- I/O's Key In Missions is a Scoreboard row, and a Tracker one while Scoreboard is off, so with both off the key is as it is out of the box
+ function SB.key_choice()if mod:is_enabled()and on()then return SB.options().key end;return S.KEY_MODES[1][1]end
  -- what a tapped-on scoreboard belongs to: the live mission, or its end screen, so it goes off when the mission ends
  function SB.context()if live_mission()then return api.tracker().mission end;return SB.finished()end
  -- its saved run, the last in its history if that is this mission, or this mission merged with its part before a rejoin
@@ -55,12 +57,12 @@ return function(mod,collectors,api)
   return deps
  end
  -- the squad's sums are rebuilt twice a second at most, the bests once a mission, a finished mission's once and again when the server's time arrives
- local cache,model,model_m,model_at,warm_m,final,final_m,final_backend={},nil,nil,-1,nil,nil,nil,nil
+ local cache,model,model_m,model_at,warm_m,final,final_m,final_backend,final_opts={},nil,nil,-1,nil,nil,nil,nil,nil
  local function source(m,team,party,finished,exclude,backend)
   local o=mod.io_display_options and mod.io_display_options()or {}
   return {m=m,tracker=api.dashboard_tracker(),team=team,party=party,basis=o.boss_map_timing and "boss"or "victory",overkill=o.includes_overkill==true,cache=cache,final=finished,exclude=exclude,backend=backend}
  end
- local function release()last,final,final_m,model,model_m,warm_m,cache.mission=nil,nil,nil,nil,nil,nil,nil end
+ local function release()last,final,final_m,final_opts,model,model_m,warm_m,cache.mission=nil,nil,nil,nil,nil,nil,nil,nil end
  function SB.end_closed()release()end
  local broken
  local function fail(err)if not broken then mod:error("I/O scoreboard: %s",tostring(err))end;broken=true end
@@ -77,23 +79,29 @@ return function(mod,collectors,api)
    return model,collectors:timer_seconds()
   end
   local f=SB.finished();if not f then return nil end
-  local backend=server_timed(f)
-  if final_m~=f.m or final_backend~=backend then
+  local backend=server_timed(f);local o=mod.io_display_options and mod.io_display_options()or {};local opts=(o.boss_map_timing and "boss"or "victory")..":"..tostring(o.includes_overkill==true)
+  if final_m~=f.m or final_backend~=backend or final_opts~=opts then
    -- a rejoin merged through the Mourningstar is read from its saved run, the only place that holds the part before the rejoin
    final=made(pcall(function()local run=f.tracker==api.dashboard_tracker()and SB.saved_run(f);local team,party=collectors:live_squad(f.m)
     local whole=run and run.merged_segment_ids and run or f.m;if whole~=f.m then team,party=load().Team.from_run(run),run.party_records end
     backend=server_timed(f);local src=source(whole,team,party,true,run and run.id or nil,backend);src.saved=whole~=f.m
-    return S.model(src,load())end));final_m,final_backend=f.m,backend
+    return S.model(src,load())end));final_m,final_backend,final_opts=f.m,backend,opts
   end
   if not final then return nil end
   return final,SB.final_seconds(f)
  end
  local ALIGN
- local pen={}
- function pen:rect(x,y,w,h,c,layer)Renderer.draw_rect(self.r,Vector3(x,y,self.z+(layer or 0)),Vector2(w,h),c)end
+ local pen={oy=0}
+ -- how tall each of the cutscene's black bars is in UI units while one plays, so nothing is drawn under them; 0 otherwise
+ local function bars(sw,sh)
+  local c=Managers.state and Managers.state.cinematic;local ok,on=pcall(function()return c and c:cinematic_active()end);if not (ok and on)then return 0 end
+  local ok2,set=pcall(require,"scripts/ui/hud/elements/cutscene_overlay/hud_element_cutscene_overlay_settings")
+  local a=ok2 and type(set)=="table"and set.aspect_ratio or 2.35;return math.max(0,(sh-sw/a)/2)
+ end
+ function pen:rect(x,y,w,h,c,layer)Renderer.draw_rect(self.r,Vector3(x,y+self.oy,self.z+(layer or 0)),Vector2(w,h),c)end
  -- draw_text scales the box but not the font, so the font is scaled here
- function pen:text(s,x,y,w,h,size,c,align,font)Renderer.draw_text(self.r,tostring(s),math.max(1,size*self.k),font or D.font.body,Vector3(x,y,self.z+4),Vector2(w,h),c,ALIGN[align or "left"])end
- function pen:texture(m,x,y,w,h,c)if Renderer.draw_texture then Renderer.draw_texture(self.r,m,Vector3(x,y,self.z+3),Vector2(w,h),c)end end
+ function pen:text(s,x,y,w,h,size,c,align,font)Renderer.draw_text(self.r,tostring(s),math.max(1,size*self.k),font or D.font.body,Vector3(x,y+self.oy,self.z+4),Vector2(w,h),c,ALIGN[align or "left"])end
+ function pen:texture(m,x,y,w,h,c)if Renderer.draw_texture then Renderer.draw_texture(self.r,m,Vector3(x,y+self.oy,self.z+3),Vector2(w,h),c)end end
  -- a text's width in UI units, measured at the font size it is drawn at
  function pen:width(s,size,font)local ok,w,_,_,caret=pcall(Renderer.text_size,self.r,s,font or D.font.body,math.max(1,size*self.k));if ok and type(w)=="number"then return D.advance(w,caret)/self.k end;return #s*size*.5 end
  -- the game's Tab overlay on a HUD while it shows, and the difficulty icon its mission block holds
@@ -131,24 +139,29 @@ return function(mod,collectors,api)
   local key=ok2 and ok3 and type(tpl)=="table"and tpl.ui and tpl.ui.description;if type(key)~="string"or type(Localize)~="function"then return end
   return below(e,sw,sh,Localize(key),measure)
  end
- -- esc says the Esc menu is up: its Tracker Panel is drawn at its own place, and a squad held over it starts under that
- -- fin, the end screen: the squad lines up with the game's currency boxes and the Tracker Panel rests above it, drawn or not
+ -- esc says the Esc menu is up: its Tracker Panel is drawn at its own place, and the squad never shows over it
+ -- fin, the end screen: the squad lines up with the game's currency boxes and the Tracker Panel rests above it, drawn or not, and with Scoreboard off above it as it comes out of the box, so no Scoreboard row moves the panel
  local function body(renderer,z,squad_too,tm_too,esc,layout,tab,fin,input)
   local sb,seconds=SB.live();if not sb then return end
-  local o=SB.options();layout=layout or o.layout;local k=renderer.scale or RESOLUTION_LOOKUP.scale or 1;local sw,sh=RESOLUTION_LOOKUP.width/k,RESOLUTION_LOOKUP.height/k
-  pen.r,pen.z,pen.k=renderer,z,k
+  local o,at=SB.options(),get;if fin and not board_on()then at=function()return nil end;o=S.options(at);layout=o.end_layout end
+  layout=layout or o.layout;local k=renderer.scale or RESOLUTION_LOOKUP.scale or 1;local sw,sh=RESOLUTION_LOOKUP.width/k,RESOLUTION_LOOKUP.height/k
+  pen.r,pen.z,pen.k,pen.oy=renderer,z,k,0
+  -- while a cutscene plays the squad keeps between its black bars and the Tracker Panel is not drawn
+  if not fin and not esc then pen.oy=bars(sw,sh);sh=sh-2*pen.oy;if pen.oy>0 then tm_too=false end end
   local extra=o.extra and S.EXTRA[layout]==true;local w,h=S.size("squad",layout,math.max(1,#sb.squad),nil,extra);local x,y,f
-  if fin then x,y,f=S.end_place(get,sw,sh,w,h,layout,extra)end
+  if fin then x,y,f=S.end_place(at,sw,sh,w,h,layout,extra)end
   if tm_too and tab then local tx,ty,tf,cats=S.tab_slot(sw,sh,get);W.tab(pen,tx,ty,sb.tm,seconds,tf,cats,icons(tab))
-  elseif tm_too then local tw,th=S.size("tm",nil,nil,S.record(sb.tm,seconds)~=nil);local tx,ty
-   -- placed as if at its tallest, so a best-clear line coming or going never moves it
-   if fin then tx,ty=S.end_tm_place(sw,x,y,w*f,tw,th)else tx,ty=S.place(esc and "tm_esc"or "tm",get,sw,sh,tw,select(2,S.size("tm",nil,nil,true)))end;W.tm(pen,tx,ty,sb.tm,seconds)end
+  elseif tm_too then local tw,th=S.size(esc and "tm_esc"or "tm");local tx,ty
+   -- on the end screen as wide as the squad under it; beside the Esc menu matched to the menu, scaled to its height and widened on the Kills side
+   if fin then tw=math.max(tw,w*f);tx,ty=S.end_tm_place(sw,x,y,w*f,tw,th);W.tm(pen,tx,ty,sb.tm,seconds,tw)
+   else tx,ty=S.place(esc and "tm_esc"or "tm",get,sw,sh,tw,th)
+    if esc then local k=th/312;W.tm(pen,tx,ty,sb.tm,seconds,tw/k,k)else W.tm(pen,tx,ty,sb.tm,seconds)end end end
   if squad_too and #sb.squad>0 then
-   if not fin then local b=tab and below(tab,sw,sh);if tab then seen={m=api.tracker().mission,sw=sw,sh=sh,b=b or nil}end;x,y,f=S.squad_place(get,sw,sh,w,h,esc,b,extra)end
-   -- with Extra Stats the Squad Table and Squad Cards have a Combat and a Support page, flipped and hovered with the mouse
-   local paged=extra and SB.input;local ctx=fin and "end"or esc and "esc"or "hud"
+   if not fin then local b=tab and below(tab,sw,sh);if tab then seen={m=api.tracker().mission,sw=sw,sh=sh,b=b or nil}end;x,y,f=S.squad_place(get,sw,sh,w,h,b,extra)end
+   -- the Strip, and with Extra Stats the Squad Table and Squad Cards, have a Combat and a Support page, flipped and hovered with the mouse
+   local pages=extra or layout=="strip";local paged=pages and SB.input;local ctx=fin and "end"or "hud"
    local hover=paged and SB.input.hover(ctx,input,k,sw,sh)or nil
-   local dw,dh=W.squad(pen,layout,x,y,sb.squad,seconds,extra,f,extra and S.page(SB.state)or nil,hover)
+   local dw,dh=W.squad(pen,layout,x,y,sb.squad,seconds,extra,f,pages and S.page(SB.state)or nil,hover,not fin and S.squad_wide(sw,x,w,f,layout,extra)or nil)
    if paged then SB.input.drawn(ctx,x,y,dw,dh,input,k)end
   end
  end
@@ -172,10 +185,11 @@ return function(mod,collectors,api)
   local dead=not held and spectator~=nil and hud==spectator and tracker_on()and SB.options().dead
   if not held and not dead then return end
   local o=SB.options();local squad=held and board_on()and o.layout~="off"
-  -- the Esc menu draws its own This Mission, so the HUD leaves it out rather than draw it twice
-  local esc=esc_shows(ui,o);local tm_too=tracker_on()and (dead or o.this_mission)and not esc
+  -- with the Esc menu up nothing is drawn here: the menu draws its own Tracker Panel, and the squad is never held over it;
+  -- nor under any other view the game hides its HUD for, but for a cutscene, where the squad keeps between its bars
+  if ui:active_top_view()=="system_view"or ui.allow_hud and not ui:allow_hud()and not ui:view_active("cutscene_view")then return end;local tm_too=tracker_on()and (dead or o.this_mission)
   if not squad and not tm_too then return end
-  return squad,tm_too,esc
+  return squad,tm_too
  end
  -- called from the one UIHud.draw hook, in mission_timer_hud, with the HUD's input
  function SB.hud(hud,input)
@@ -188,13 +202,13 @@ return function(mod,collectors,api)
   -- an overlay that broke still lets the end screen read the mission just played
   if broken or not on()then return end
   if m and m~=warm_m then warm(m)end
-  local squad,tm_too,esc=plan(ui,hud);if squad==nil then return end
+  local squad,tm_too=plan(ui,hud);if squad==nil then return end
   local renderer=hud._ui_renderer;if not renderer or not renderer.gui then return end
   -- the game dims a pass by the settings it begins with, and the HUD keeps its dimming under the Tab overlay in its own, so this pass is never dimmed
   Renderer.begin_pass(renderer,scenegraph,nil,0,settings)
   -- the game's UI goes no higher than layer 999, and anything drawn above it lands there with its box over its text, so the boxes
   -- sit just under and the text on 999, level with the cutscene bars and above their fade on 998
-  draw(renderer,995,squad,tm_too,esc,nil,overlay(hud),nil,input)
+  draw(renderer,995,squad,tm_too,false,nil,overlay(hud),nil,input)
   Renderer.end_pass(renderer)
  end
  -- beside the Esc menu, drawn inside the menu's own pass and only while it is the top view

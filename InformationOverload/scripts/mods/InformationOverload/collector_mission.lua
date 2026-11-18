@@ -2,7 +2,7 @@
 return function(mod,api,C,deps)
     local Mission={}
     local Context,Damage,RunResume=deps.Context,deps.Damage,deps.RunResume
-    local Timeline,DepartureTracking,Attacks,Incidents,Bosses=deps.Timeline,deps.DepartureTracking,deps.Attacks,deps.Incidents,deps.Bosses
+    local DepartureTracking,Attacks,Incidents,Bosses=deps.DepartureTracking,deps.Attacks,deps.Incidents,deps.Bosses
     local SocialNames,Measurements=deps.SocialNames,deps.Experimental
     local timeline,sample_prophet,sample_controls,drain_attacks,update_dps=deps.timeline,deps.sample_prophet,deps.sample_controls,deps.drain_attacks,deps.update_dps
     local finish_compact,reset_down_seen,set_control_states=deps.finish_compact,deps.reset_down_seen,deps.set_control_states
@@ -65,7 +65,10 @@ return function(mod,api,C,deps)
             -- The intro can run before the gameplay mission manager exists.
             local participated = pending_intro == true or (saw_intro and intro_manager == manager) or (entry_clock_manager==manager and entry_clock~=nil and entry_clock<=5)
             pending_intro = nil
+            -- the level's own scene init and intro ran before this first sighting, so its origin outlives the boundary
+            local origin=intro_origin
             C:boundary()
+            intro_origin=origin
             if pending_result and not pending_result.interrupted and not pending_result.private_review then pending_result=nil end
             mission_manager, ended = manager, false
             saw_intro = participated
@@ -176,10 +179,11 @@ return function(mod,api,C,deps)
         local m=pending_result and pending_result.mission or api.tracker().mission
         Damage.checkpoint_damage(m)
         if not m or m.context.solo or m.context.difficulty=="psykhanium" or m.context.difficulty=="TEST ONLY" or m.history_recorded then
-            stored_set("unfinished_run_v1",nil);return
+            -- clearing marks the catalog changed, so only clear one that is there or every 15 s hub save builds the catalog again
+            if mod.io_data_get and mod.io_data_get("unfinished_run_v1")~=nil or not mod.io_data_get and mod:get("unfinished_run_v1")~=nil then stored_set("unfinished_run_v1",nil)end;return
         end
         local snapshot={}
-        for _,name in ipairs({"private_review_victory","finished_victory","started_at","timing_origin","completion_time","completion_markers","timing_diagnostics","context","full","exploded","failed","damage","barrel_pops","team_damage","party_records","support","psyk_dps","record_values","replay_best","replay_armour","replay_kill_segments","replay_blo_contexts","replay_blo_best","data_before","ammo","ammo_seen","kills","incidents","friendly_fire_pairs","pickup_pairs","pickup_states","team_psykers","field_improvisation","enemy_lethality","hyper_critical","haymaker","class_events","clutches","clutch_bot_recovered","operative_clutches","kill_categories","leave_hits","departure_snapshot","departure_events","all_departures","segments","resumed","bot_links","bot_candidates","bot_appearances","bot_pickup_events","last_departure","last_observed_clock","ended_clock","ended_wall","boss_seen","boss_credit_seen","boss_operative_seen","boss_operatives","boss_kills","departed_players","players_left","lethality_events","lethality_active","enemy_kill_counts","recovery_rows","experimental","measurements","combat_timeline"}) do snapshot[name]=m[name] end
+        for _,name in ipairs({"private_review_victory","finished_victory","data_only","started_at","timing_origin","completion_time","completion_markers","timing_diagnostics","context","full","exploded","failed","damage","barrel_pops","team_damage","party_records","support","psyk_dps","record_values","replay_best","replay_armour","replay_kill_segments","replay_blo_contexts","replay_blo_best","data_before","ammo","ammo_seen","kills","incidents","friendly_fire_pairs","pickup_pairs","pickup_states","team_psykers","field_improvisation","enemy_lethality","hyper_critical","haymaker","class_events","clutches","clutch_bot_recovered","operative_clutches","kill_categories","leave_hits","departure_snapshot","departure_events","all_departures","segments","resumed","bot_links","bot_candidates","bot_appearances","bot_pickup_events","last_departure","last_observed_clock","ended_clock","ended_wall","boss_seen","boss_credit_seen","boss_operative_seen","boss_operatives","boss_kills","departed_players","players_left","lethality_events","lethality_active","enemy_kill_counts","recovery_rows","experimental","measurements","combat_timeline"}) do snapshot[name]=m[name] end
         if api.recovery_delta and m.data_before then snapshot.progress_delta=api.recovery_delta(m)end
         snapshot.record_update_keys,snapshot.enemy_update_keys=credit_keys(m)
         stored_set("unfinished_run_v1",snapshot)
@@ -201,7 +205,7 @@ return function(mod,api,C,deps)
         local active = tracker.mission
         tracker.mission = pending_result.mission
         finish_compact(pending_result.mission)
-        local partial_mission=pending_result.mission;local partial_win=pending_result.victory
+        local partial_mission=pending_result.mission
         local counted = tracker:finish_mission(true, pending_result.victory, not partial_mission.full)
         tracker.mission = active
         pending_result = nil

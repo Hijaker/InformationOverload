@@ -28,7 +28,7 @@ local function cy(y)return CY0+y*CK end
 local function crect(x,y,w,h,c,edge)rect(cx(x),cy(y),w*CK,h*CK,c,edge)end
 local function ctext(s,x,y,size,c,align)text(s,cx(x),cy(y),size,c,align or "middle")end
 -- a head and shoulders in a portrait slot
-local function head(x,y,w,h)local r=w*.2*CK;cv:circle(ox+cx(x+w/2),oy+cy(y)+h*CK*.36,r,CS_FACE)
+local function head(x,y,w,h)local r=w*.2*CK*math.min(SX,SY);cv:circle(ox+cx(x+w/2)*SX,oy+(cy(y)+h*CK*.36)*SY,r,CS_FACE)
  rect(cx(x+w*.14),cy(y+h*.66),w*.72*CK,h*.34*CK,CS_FACE);rect(cx(x+w*.24),cy(y+h*.6),w*.52*CK,h*.08*CK,CS_FACE)end
 -- the class emblem: a diamond in slices, a darker one inside, and the eye
 local function emblem(x,y,hw,hh,c)local n=16
@@ -56,9 +56,13 @@ function DRAW.charselect()
  for _,e in ipairs({{1455,"1","Horde"},{1575,"1","Elites"},{1695,"1","Specials"},{1815,"0","Bosses"}})do ctext(e[2],e[1],468,6,CS_WHITE);ctext(e[3],e[1],494,4.4,CS_GREY)end
  ctext("Most Ranged: Dreg Stalker "..W0.."x1"..R0,c,524,4.4,CS_GREY);ctext("Most Melee: Crusher "..W0.."x1"..R0,c,549,4.4,CS_GREY)
  emblem(c,730,59,77,rgba(169,163,151));emblem(c,730,52,68,rgba(111,106,96));emblem(c,730,44,58,rgba(74,71,64))
- cv:circle(ox+cx(c),oy+cy(730),18*CK,rgba(201,195,181));cv:circle(ox+cx(c),oy+cy(730),12*CK,rgba(74,71,64));cv:circle(ox+cx(c),oy+cy(730),7*CK,rgba(201,195,181))
+ cv:circle(ox+cx(c)*SX,oy+cy(730)*SY,18*CK*math.min(SX,SY),rgba(201,195,181));cv:circle(ox+cx(c)*SX,oy+cy(730)*SY,12*CK*math.min(SX,SY),rgba(74,71,64));cv:circle(ox+cx(c)*SX,oy+cy(730)*SY,7*CK*math.min(SX,SY),rgba(201,195,181))
  ctext("Venn",c,842,6.5,CS_WHITE);ctext("Salvage Lord",c,874,4.8,rgba(210,168,106));ctext("Veteran - 30 (+95)",1642,906,4.6,CS_GREY)
  crect(1420,928,430,104,CS_BTN,rgba(169,181,154));crect(1420,928,430,22,rgba(255,255,255,.08));ctext("START",c,1000,11,CS_WHITE)
+ -- the news bar under Start: the wallet's panel with its metal dividers, the picture and the headline
+ crect(1370,1069,530,8,CS_METAL);crect(1380,1090,510,88,rgba(90,115,83,.95));crect(1370,1186,530,8,CS_METAL)
+ crect(1400,1106,113,57,rgba(150,118,74));crect(1400,1136,113,27,rgba(60,74,64))
+ ctext("Patch Notes",1532,1142,5.2,CS_WHITE,"start")
  ctext("ACCOUNT WALLET",1990,646,3.6,CS_GOLD,"end");crect(1785,655,215,210,rgba(60,72,56,.92),CS_METAL)
  for i,e in ipairs({{"1 147 242",CS_GOLD},{"11 620",CS_WHITE},{"149 897",rgba(201,198,186)},{"66 956",CS_BLUE}})do
   ctext(e[1],1952,714+(i-1)*42,6,e[2],"end");crect(1964,690+(i-1)*42,24,22,rgba(141,135,122))end
@@ -95,15 +99,15 @@ function DRAW.social()
  stext("Strike Team 2/4",167,262,7,rgba(228,228,218),"start");srect(167,272,540,440,SQ_PANEL,SQ_METAL)
  for i,y in ipairs({298,402})do local on=i==2
   srect(187,y,500,84,on and rgba(70,85,62,.6)or rgba(52,66,50,.6),on and GOLD or SQ_METAL);srect(192,y+6,66,72,rgba(58,58,52))
-  cv:circle(ox+ssx(225),oy+ssy(y+6)+72*SK*.36,66*SK*.2,SQ_FACE);srect(201,y+54,48,24,SQ_FACE)
+  cv:circle(ox+ssx(225)*SX,oy+(ssy(y+6)+72*SK*.36)*SY,66*SK*.2*math.min(SX,SY),SQ_FACE);srect(201,y+54,48,24,SQ_FACE)
   local who=i==1 and {"HijaKer","Ogryn"}or {"Lily","Psyker"}
   stext(who[1],276,y+40,6,rgba(228,228,218),"start");stext(who[2],276,y+66,4.5,rgba(150,160,140),"start")
  end
  for _,y in ipairs({506,610})do srect(187,y,500,84,SQ_INSET,SQ_METAL)end
  -- the record panel, drawn as its own picture and fitted to the list's box
  local bx,by,bw,bh=ssx(757),ssy(272),1078*SK,716*SK
- local x,y=ox,oy;SX,SY=bw/346,bh/244;ox,oy=x+bx-16*SX,y+by-14*SY
- social_panel();SX,SY,ox,oy=1,1,x,y
+ local x,y,px,py=ox,oy,SX,SY;SX,SY=px*bw/346,py*bh/244;ox,oy=x+bx*px-16*SX,y+by*py-14*SY
+ social_panel();SX,SY,ox,oy=px,py,x,y
 end
 -- Mission Board: the map with its tiles over the two rings of the hive's platform, and the briefing's groups for an example map
 local BK=346/1948;local BY0P=14+(247-982*BK)/2
@@ -122,7 +126,7 @@ local function ring(cyy,rx,ry,c)local n=72;local X0,Y0=m(0,0);local X1,Y1=m(1751
  local function at(t)local X,Y=m(875+rx*math.cos(t),cyy+ry*math.sin(t));return X,Y end
  for i=0,n-1 do local ax,ay=at(2*math.pi*i/n);local cx2,cy2=at(2*math.pi*(i+1)/n)
   if math.min(ax,cx2)>=X0 and math.max(ax,cx2)<=X1 and math.min(ay,cy2)>=Y0 and math.max(ay,cy2)<=Y1 then
-   cv:line(ox+bsx(ax),oy+bsy(ay),ox+bsx(cx2),oy+bsy(cy2),.9,c,nil,true)end end end
+   cv:line(ox+bsx(ax)*SX,oy+bsy(ay)*SY,ox+bsx(cx2)*SX,oy+bsy(cy2)*SY,.9,c,nil,true)end end end
 function DRAW.board()
  mrect(0,0,1751,1279,MAP_DARK)
  -- lit from the platform up, every other line a shade dimmer, then a soft column of light up the spire that fades out as it rises to the top
@@ -186,8 +190,8 @@ local SQUAD={{"Kassia Venn","Veteran","61,204",.34,{"8,412","612","1,036","412",
  {"Ksen","Psyker","40,112",.22,{"4,120","803","597","290","243","25","22","0","150","93","0","0"}},
  {"Dross","Ogryn","22,301",.12,{"9,960","241","352","175","153","12","9","1","140","13","2","1"}}}
 -- each row's label, its top and its kind: small, under Kills, or one half of the last row
-local QROWS={{"Boss Dmg",176,"small"},{"Weakspots Hit",202,"small"},{"Critical Hits",228,"small"},{"Kills",262},{"Lesser Enemies",290,"in"},{"Elites",312,"in"},
- {"Specials",334,"in"},{"Monstrosities",356,"in"},{"Melee Enemies",386,"in"},{"Ranged Enemies",408,"in"},{"Downs",446,"half"},{"Deaths",446,"half2"}}
+local QROWS={{"Boss Dmg",176,"small"},{"Weakspots Hit",202,"small"},{"Critical Hits",228,"small"},{"Kills",262},{"Horde",290,"in"},{"Elites",312,"in"},
+ {"Specials",334,"in"},{"Bosses",356,"in"},{"Melee Enemies",386,"in"},{"Ranged Enemies",408,"in"},{"Downs",446,"half"},{"Deaths",446,"half2"}}
 local function n(v)return tonumber((v:gsub(",","")))end
 function DRAW.scoreboard()
  local function q(x,y,w,h,c,edge)rect(16+x*QK,QY+y*QK,w*QK,h*QK,c,edge)end
@@ -210,28 +214,19 @@ function DRAW.scoreboard()
   end
  end
 end
--- the Tracker Panel laid out as scoreboard_draw's own, its 700 by 362 shrunk into the picture, with example figures
-local TK,TX,TY=346/700,16,14+(249-362*346/700)/2
-local function trect(x,y,w,h,c)rect(TX+x*TK,TY+y*TK,w*TK,h*TK,c)end
-local function tbox(s,x,y,w,h,size,c,align,font)cv:text(s,ox+TX+x*TK,oy+TY+y*TK,w*TK,h*TK,size*TK,c,align or "left",font or F.medium)end
-local RULE,TM_BOX,GV=rgba(60,78,57,.6),rgba(10,13,10,.88),"{#color(221,183,99)}"
+-- the Tracker Panel as scoreboard_draw itself draws it, its 700 by 312 shrunk into the picture, with example figures
+local TK,TX,TY=346/700,16,14+(249-312*346/700)/2
+local Board
+P.TRACKER_EXAMPLE={title="Magistrati Oubliette · Damnation",full=true,best_clear=1450,kills=286,kills_best=417,
+ cats={{"Melee Horde",142},{"Ranged Horde",96},{"Elite",28},{"Special",17},{"Boss",3}},streak=37,streak_best=61,health_streak=52,health_streak_best=88,downs=1,deaths=0}
 function DRAW.tracker()
- trect(0,0,700,362,TM_BOX);trect(0,0,700,2,FRAME);trect(0,360,700,2,FRAME);trect(0,0,2,362,FRAME);trect(698,0,2,362,FRAME)
- for _,p in ipairs({{0,0},{1,0},{0,1},{1,1}})do trect(p[1]*688,p[2]*360,12,2,CORNER);trect(p[1]*698,p[2]*350,2,12,CORNER)end
- tbox("Magistrati Oubliette · Damnation",24,12,652,34,26,VALUE,"left",F.title);trect(24,52,652,1,RULE)
- local ay,ax,bx,cx=64,24,246,478
- tbox("Mission Time",ax,ay,200,24,18,LABEL);tbox("18:41",ax,ay+22,210,80,72,VALUE,"left",F.title)
- trect(ax,ay+112,194,5,TRACK);trect(ax,ay+112,194*.77,5,LABEL);tbox("Best Clear",ax,ay+122,120,22,16,MUTED);tbox("24:10",ax,ay+122,194,22,16,GOLD,"right")
- trect(bx-14,ay,1,226,RULE);trect(cx-14,ay,1,226,RULE)
- tbox("Kill Streak",bx,ay,210,24,18,LABEL);tbox("Kills Before Taking A Hit",bx,ay+24,210,20,14,MUTED);tbox("37",bx,ay+44,90,26,24,VALUE,"left",F.title);tbox("Mission Best 61",bx,ay+46,210,22,14,GOLD,"right")
- tbox("Kills Before Losing Health",bx,ay+72,210,20,14,MUTED);tbox("52",bx,ay+92,90,24,22,VALUE,"left",F.title);tbox("Best 88",bx,ay+94,210,22,14,GOLD,"right");trect(bx,ay+118,210,1,RULE)
- tbox("Downs",bx,ay+124,210,24,18,LABEL);tbox("1",bx,ay+148,120,50,46,VALUE,"left",F.title);tbox("Deaths "..V.."0"..R0,bx,ay+168,210,22,15,MUTED,"right")
- tbox("Last: Poxburster",bx,ay+200,210,22,15,MUTED)
- tbox("Kills",cx,ay,198,24,18,LABEL);tbox("412",cx,ay+24,120,50,46,VALUE,"left",F.title);tbox("Best Here "..GV.."455"..R0,cx,ay+44,198,22,15,MUTED,"right");trect(cx,ay+82,198,1,RULE)
- for i,e in ipairs({{"Melee Horde","214"},{"Ranged Horde","96"},{"Elite","41"},{"Special","28"},{"Boss","2"}})do local ry=ay+86+(i-1)*28
-  tbox(e[1],cx,ry,140,28,17,MUTED);tbox(e[2],cx,ry,198,28,22,VALUE,"right",F.title)end
- trect(ax,304,652,40,GOLD_TINT);trect(ax,304,4,40,GOLD);tbox("Record In Reach",ax+16,304,210,40,22,GOLD,"left",F.title)
- tbox(GV.."5:29"..R0.." to beat your best clear",ax+226,304,420,40,18,LABEL)
+ Board=Board or mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/scoreboard_draw")(mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/scoreboard"),D)
+ local pen={}
+ function pen:rect(x,y,w,h,c)rect(TX+x*TK,TY+y*TK,w*TK,h*TK,c)end
+ function pen:text(s,x,y,w,h,size,c,align,font)cv:text(s,ox+(TX+x*TK)*SX,oy+(TY+y*TK)*SY,w*TK*SX,h*TK*SY,size*TK*math.min(SX,SY),c,align or "left",font)end
+ -- no measure here, so each character is taken a little wider than the game's fonts set it, which keeps every line whole
+ function pen:width(s,size)return #tostring(s):gsub("{#[^}]*}","")*size*.58 end
+ Board.tm(pen,0,0,P.TRACKER_EXAMPLE,1121)
 end
 function DRAW.endscreen()
  rect(18,16,342,240,BG.endscreen,SEL)
@@ -247,11 +242,77 @@ function DRAW.endscreen()
   text(e[1],30,y,9,VALUE);rect(76,y-5,150,4,FAINT);rect(76,y-6,e[3],6,LABEL);rect(76+e[4],y-9,2,10,VALUE);text(e[2],252,y,10,VALUE,"end")end
  text("Most Killed",348,220,8,LABEL,"end");text("Poxwalker 155",348,233,10,VALUE,"end")
 end
+-- Havoc: I/O's Havoc screen as it stands in game (15 Nov 2026), at 16:10: the Strike Team band as a party of four
+-- the map's panel and record, the modifiers, the Briefing, Threats and Team tabs, the latest runs, and the game's Reward Cache
+-- column with the Assignment Rank, Party Finder and Play; mission pictures as soft light, with no hard shapes
+local HK=346/1920;local HY0=14+(247-1200*HK)/2
+local function hr(x,y,w,h,c,e)rect(16+x*HK,HY0+y*HK,w*HK,h*HK,c,e)end
+-- only the big titles are written; every smaller word, too small to read at card size, is a faint bar its length, so the picture keeps the
+-- screen's shape with no smudged text
+local function ht(s,x,y,u,c,align,title)
+ if u*HK>=7 then return text(s,16+x*HK,HY0+y*HK,u*HK,c,align,title)end
+ local w=math.min(#s*u*.5,1200);local bx=align=="end"and x-w or align=="middle"and x-w/2 or x
+ hr(bx,y-u*.62,w,u*.5,{math.floor(c[1]*.55+.5),c[2],c[3],c[4]})
+end
+local HV={rule=rgba(88,106,89),white=rgba(214,214,204),grey=rgba(117,136,119),gold=rgba(232,198,102),ggold=rgba(240,196,92),io=rgba(0,0,0,.9),
+ green=rgba(150,200,110),gdim=rgba(160,160,150),red=rgba(200,60,50)}
+-- a soft light from the middle of a box, stepped finely enough to read as a gradient at card size
+local function glow(x,y,w,h,c,a)local n=24;for k=1,n do local f=k/n;local iw,ih=w*(1-.8*f),h*(1-.55*f);hr(x+(w-iw)/2,y+(h-ih)/2,iw,ih,rgba(c[1],c[2],c[3],a/n*1.6))end end
+local function mpic(x,y,w,h)hr(x,y,w,h,rgba(18,34,22));glow(x,y+h*.2,w,h*.8,{110,190,90},.55);hr(x,y+h-h*.18,w,h*.18,rgba(0,0,0,.35))end
+local function badge(r,c)local n=14;for i=0,n-1 do local t=(i+.5)/n;local w=2*r*math.sqrt(math.max(0,1-(2*t-1)^2));hr(1636-w/2,632-r+i*2*r/n,w,2*r/n+.6,c)end end
+function DRAW.havoc()
+ hr(0,0,1920,1200,rgba(12,18,14));glow(0,0,1920,1200,{40,90,50},.10)
+ ht("HAVOC",77,122,44,HV.gold,"start",true)
+ hr(77,136,1144,301,HV.io,HV.rule)
+ -- the Strike Team band in a party of four: a tile each, the shown one edged gold, Most Votes on the leader, the rank a win gives and a vote under each
+ local TW4=(1126-24)/4
+ for i,p in ipairs({{"Ashgrave",true,2},{"Mirelle",false,1},{"Kessel",false,0},{"Dross",false,1}})do
+  local x,y,w,h=86+(i-1)*(TW4+8),146,TW4,281;local cx,cw=x+12,TW4-24
+  mpic(x,y,w,h);hr(x,y,w,h,rgba(0,0,0,.25));hr(x,y,w,h,nil,i==1 and HV.gold or HV.rule);if i==1 then hr(x+1,y+1,w-2,h-2,nil,HV.gold)end
+  ht(p[1],cx,y+26,14,HV.white,"start");if i==1 then hr(x+w-12-84,y+12,84,20,HV.gold)end
+  ht("Warren 6-19",cx,y+50,17,HV.white,"start");ht("Havoc 20 · Scabs · Disruption",cx,y+70,11.5,HV.gdim,"start")
+  for j=0,3 do hr(cx+j*30,y+84,24,24,HV.ggold)end
+  ht("Your Record There",cx,y+196,12,HV.grey,"start");ht("No Runs Yet",cx+cw,y+196,12,HV.white,"end")
+  ht("Win: +1 Rank",cx,y+222,15,HV.green,"start")
+  hr(cx,y+238,cw,1,HV.rule);ht(p[3]>0 and p[3].." Votes: Ashgrave, Mirelle"or "No Votes",cx,y+262,11,HV.grey,"start")
+  hr(cx+cw-70,y+246,70,24,p[2]and HV.gold or rgba(0,0,0),p[2]and HV.gold or HV.rule)
+ end
+ hr(77,451,480,549,HV.io,HV.rule)
+ ht("Warren 6-19",97,475,21,HV.white,"start");ht("Habzone HL-70-04, \"The Carnival\"",97,494,14,HV.gdim,"start");ht("Primary Objective: Disruption",97,511,14,HV.white,"start")
+ ht("Your Best Clear",541,472,11,HV.grey,"end");ht("No Timed Win Yet",541,512,11,HV.grey,"end")
+ mpic(77,518,480,275)
+ hr(77,804,480,159,nil,HV.rule);hr(77,883,480,1,HV.rule)
+ for _,c in ipairs({{"Won","—",94},{"Runs","0",204},{"Best Damage","—",300},{"At Havoc 20","—",444}})do ht(c[1],c[3],826,11,HV.grey,"start");ht(c[2],c[3],850,17,HV.white,"start");ht(c[1]=="Won"and "Win Rate"or "No Runs Yet",c[3],868,11,HV.grey,"start")end
+ for _,c in ipairs({{"Downs And Deaths",94},{"Per Run",280},{"Win–Loss",416}})do ht(c[1],c[2],906,11,HV.grey,"start");ht("—",c[2],928,17,HV.white,"start")end
+ ht("Time until Assignment reset: 9 hours, 16 minutes",94,986,14,HV.white,"start")
+ hr(571,451,648,242,HV.io,HV.rule)
+ for _,m in ipairs({{"The Final Toll",590,478,4},{"Pus-hardened Skin",912,478,3},{"The Emperor's Fading light (I)",590,584,2},{"Ventilation Purge",912,584,2}})do
+  hr(m[2]-10,m[3]-14,3,m[4]*18+24,HV.ggold);hr(m[2],m[3]-14,22,22,HV.ggold);ht(m[1],m[2]+32,m[3],15,HV.ggold,"start")
+  for i=0,m[4]-1 do hr(m[2]+32,m[3]+10+i*17,250-i*30,7,rgba(214,214,204,.55))end
+ end
+ for i,s in ipairs({"Briefing","Threats","Team"})do local x=581+(i-1)*212;hr(x,701,206,30,i==1 and rgba(30,30,24)or rgba(0,0,0,.9),i==1 and HV.gold or HV.rule);ht(s,x+103,721,13,HV.white,"middle")end
+ hr(571,739,648,264,HV.io,HV.rule);hr(571,773,648,1,HV.rule);ht("Briefing: Warren",587,760,12,HV.grey,"start");ht("From Saved Matches",1203,760,12,HV.grey,"end")
+ ht("»",590,890,26,HV.green,"start");ht("No Runs Yet.",628,886,14,HV.white,"start");ht("Your saved Havoc matches on this map will show here.",722,886,12,HV.grey,"start")
+ hr(77,1018,1144,76,HV.io,HV.rule);hr(198,1018,1,76,HV.rule);ht("Latest Runs",137,1046,13,HV.white,"middle");ht("Warren · Newest First",137,1066,11,HV.grey,"middle")
+ ht("[ESC] Back",77,1124,20,HV.white,"start");ht("[O] Demote Assignment   [E] Matchmaking Server Location   [H] Help",1221,1124,20,HV.white,"end")
+ ht("REWARD CACHE",1437,126,44,HV.gold,"start",true);ht("Complete an Assignment to be eligible for",1437,149,18,HV.gold,"start");ht("a Reward Cache at the start of next week.",1437,172,18,HV.gold,"start")
+ hr(1437,200,398,120,rgba(40,62,42));glow(1437,200,398,120,{150,190,140},.45);glow(1580,214,118,82,{150,150,140},.7);hr(1437,320,398,40,rgba(16,20,16))
+ hr(1437,381,398,52,rgba(10,12,10),HV.rule);hr(1450,395,26,24,HV.gold);ht("Complete a Havoc Assignment",1495,414,15,HV.white,"start")
+ hr(1437,445,398,70,rgba(10,12,10),HV.rule);ht("Highest Assignment Rank completed this",1455,473,14,HV.white,"start");ht("week:",1455,492,14,HV.white,"start");ht("19",1812,488,22,HV.gold,"end",true)
+ ht("ASSIGNMENT RANK",1636,553,26,HV.white,"middle",true);hr(1556,582,160,10,rgba(120,100,70))
+ badge(56,rgba(150,110,60));badge(44,rgba(40,24,18));ht("20",1636,650,44,HV.gold,"middle",true)
+ ht("Deployments until Demotion:",1636,778,22,HV.gdim,"middle");for _,x in ipairs({1593,1636,1679})do hr(x-9,800,18,24,HV.gdim)end
+ hr(1462,855,341,58,rgba(70,100,70),rgba(169,181,154));ht("PARTY FINDER",1632,895,24,rgba(228,228,218),"middle")
+ hr(1462,946,341,58,rgba(30,40,30),rgba(169,181,154));ht("PLAY",1632,986,24,rgba(150,160,150),"middle")
+ -- the notice in the Havoc screen's own yellow
+ hr(1459,1018,346,78,rgba(58,46,14,.95),HV.gold);ht("Havoc needs at least 2 players.",1632,1063,15,HV.gold,"middle")
+end
 -- a picture that fails is told once and left blank, and the rest of the page still draws
 local broken={}
-function P.draw(canvas,id,x,y)
+-- drawn at its own 378 by 273, or shrunk to w by h
+function P.draw(canvas,id,x,y,w,h)
  local f=DRAW[id];if not f or broken[id]then return end
- cv,ox,oy,SX,SY=canvas,x,y,1,1;local ok,err=pcall(f);cv=nil
+ cv,ox,oy,SX,SY=canvas,x,y,(w or 378)/378,(h or 273)/273;local ok,err=pcall(f);cv=nil
  if not ok then broken[id]=true;mod:error("I/O Screens picture %s: %s",id,tostring(err))end
 end
 return P
