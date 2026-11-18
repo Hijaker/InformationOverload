@@ -4,19 +4,13 @@
 
 ## Havoc Board
 
-The Havoc Board will bring the assignments of party members using Information Overload into one view. See each assignment's map, rank and modifiers, alongside your own stats for that map, just like the current Mission Board.
+The Havoc Board is in. It brings the Assignments of Strike Team members using Information Overload into one view, with each Assignment's map, rank and modifiers alongside your own stats for that map. You can vote for the Assignments you'd like to play, press **Play** on a teammate's shared Assignment if they allow it, and see who is blocking a start and why. See [Other Game Screens](https://github.com/Hijaker/InformationOverload/wiki/Other-Game-Screens#what-does-the-havoc-board-add).
 
-Any party member using the board will be able to press **Play** on any shared assignment. This asks the assignment owner to start the game's normal mission vote, subject to the owner's launch permissions and the game's eligibility checks.
-
-The ability to place your vote for which of the assignements available to you, that you'd like to play.
-
-Preset your readiness state, to automatically accept a "Mission Start" popup.
+Still planned: preset your readiness state, to automatically accept a "Mission Start" popup.
 
 - **Ready** automatically accepts any map you've voted for that you'd like to play.
 - **No choice yet** leaves the normal game popup for you to answer.
 - **Not Ready** automatically declines.
-
-If a mission cannot start, the board aims to show who is blocking the start and why, where the game makes that information available. For example that they're loading in, or haven't taken out their weekly Havoc Rewards cache.
 
 ## Talents and blessings
 

@@ -92,9 +92,9 @@ A number doesn't mean a slot. `api.player_damage(1)` finds no one.
 local live, history = api.revision()
 ```
 
-Two numbers that only ever go up. `live` goes up when anything `squad()`, `player_damage()`, `roster()`, `whoami()` or `streaks()` would show has changed: damage, kills, downs, deaths, who's in the squad, your streaks. `history` goes up when a match is saved, deleted or recounted, or a clear time is edited.
+Two numbers that only ever go up. `live` goes up when anything `squad()`, `player_damage()`, `roster()`, `whoami()` or `streaks()` would show has changed: damage, kills, downs, deaths, who's in the squad, your streaks. `history` goes up when a match is saved, deleted or recounted, a clear time is edited, history is rebuilt, imported or restored, or the Boss timing setting is changed.
 
-`mission()`'s `tracked_seconds` counts up all the time without moving `live`, so read `mission()` directly when you want a timer.
+`mission()`'s `tracked_seconds` counts up until the mission is won, or the boss dies with Boss timing on, without moving `live`, so read `mission()` directly when you want a timer.
 
 Calling it costs almost nothing and makes no garbage, so call it every frame and only ask for the real data when a number moves.
 
@@ -142,12 +142,12 @@ One row per player in the mission: everything I/O's Squad Cards show. You come f
 | `damage.share` | their part of the squad's damage, from 0 to 1 |
 | `damage.boss` | damage to bosses (useful damage, or all of it with `overkill = true`) |
 | `kills.total` | every kill |
-| `kills.lesser`, `kills.elite`, `kills.special`, `kills.boss` | kills by enemy kind |
-| `kills.melee`, `kills.ranged` | lesser and elite kills, split by whether the enemy fights up close or at range |
+| `kills.lesser`, `kills.elite`, `kills.special`, `kills.boss` | kills by enemy kind, as the scoreboard's Horde, Elites, Specials and Bosses (Monstrosities and Captains) |
+| `kills.melee`, `kills.ranged` | horde and elite kills, split by whether the enemy fights up close or at range |
 | `hits.weakspot`, `hits.critical` | weakspot and critical hits |
 | `downs`, `deaths` | times downed and killed |
 
-Your own row's kills come from the same count as I/O's This Mission panel, so they match what the scoreboard shows.
+Your own row's kills come from the same count the scoreboard uses for you, so they match what it shows. The `lesser` key keeps its old name; the scoreboard used to call these Lesser Enemies.
 
 Before I/O has seen the rest of the squad, the list holds just you.
 
@@ -273,10 +273,14 @@ The fields follow I/O's frontend contract (`capabilities.frontend_contract` says
 Frontend contract 2 (I/O 1.0.4): a saved match keeps what I/O's pages read, and older saves are tidied to match. I/O packs some parts on disk, but `history_match` hands them out read back, in the shapes below.
 
 - `party_records.members[]` no longer has `enemy`, `armour`, `weapons` or `quality`. Kills and `best` are as before.
+- `party_records.members[].best.single_hit` is the biggest hit that wasn't an explosion; an explosion is only ever `best.explosive_single_hit`. A match saved before explosions were kept apart can still hold its biggest explosion as `single_hit` too, with `category = "explosion"`. I/O's pages skip a `single_hit` like that, and so should you.
 - `combat_timeline` hits are `{time_ms, reported, useful_or_false, profile, attack_type, result, flags}`, without the eighth number, the running sequence; segments have no `sequence`. Its `streak_events` keep only resets whose cause is `knocked_down` or `died`. The streak counters are as before.
 - `enemy_kill_counts.members[]` keeps `personal` and `enemy_kills`, without `class`.
 - `damage` tallies no longer count `health_hits`.
+- `team_damage.minutes`, in matches played since it was added, holds each operative's useful damage and kills by minute of the mission, read back as `{version, origin_ms, count, start, members = {[character_id] = {useful = {...}, kills = {...}}}}`. Each array is `count` long, minute `k` at `[k + 1]`, running from minute 0 to the last minute anyone has a figure in; a minute with nothing is `0`. `start` is how many seconds after the match's 0:00 minute 0 begins, which is `0` unless the minutes were counted from another start. Useful damage is in whole numbers, rounded so the minutes add up to the operative's total. A match from before they were kept has no `minutes`, and a match joined from two parts has the parts added minute by minute.
 - `experimental` is gone from saved matches, and the old research blocks `talent_calibration`, `compact_damage_test`, `hyperviolence_poc`, `performance`, `damage_diagnostics` and `talent_test` with it.
+
+A match the tidy has not reached yet is handed out as it was saved, so it may still carry the parts above and every reset in `streak_events`: read downs and deaths by their cause. A saved timeline segment comes with its hits read back under `events`, as the seven-number tuples above, though it keeps `version = 3`.
 
 It gives `nil, "excluded"` for a match `history()` leaves out, and `nil, "unreadable match"` if the file is missing or damaged.
 
@@ -353,8 +357,8 @@ A reader has the same calls as `api`: `revision`, `mission`, `squad`, `player_da
 - Its tables are yours alone. No other mod sees them, and nothing you do to them reaches I/O.
 - If you change one, your own next answer has your change in it until the numbers move. `names()` never changes, and `mission()` is written over every time you ask. Copy a table first if you want to sort or edit it.
 - Each set of options is its own answer: `reader.squad()` and `reader.squad({ overkill = true })` are two tables.
-- `reader.mission()` is always the same table, brought up to date every time you ask, because `tracked_seconds` counts up without moving `revision()`.
-- It keeps the last 8 full matches you asked `history_match()` for, and the last 16 pages of `history()`.
+- `reader.mission()` is always the same table, brought up to date every time you ask, because `tracked_seconds` counts up until the win without moving `revision()`.
+- It keeps the last 8 full matches you asked `history_match()` for, the last 16 pages of `history()` and the last 64 answers from `run_damage()`.
 - After a mods reload it's stale like every other call. Get a new one from the new `api`.
 
 ## What the damage numbers mean
@@ -381,7 +385,7 @@ Damage to void shields is left out of every number, as it is on I/O's own pages.
 |---|---|
 | `"stale"` | the mods were reloaded; fetch I/O again |
 | `"unavailable"` | I/O's live counting failed to load (`capabilities.live` is `false`) |
-| `"not recording"` | I/O is turned off or Psykhanium tracking is off and you're in the Psykhanium |
+| `"not recording"` | I/O is turned off, Personal Records is enabled alongside it, or Psykhanium tracking is off and you're in the Psykhanium |
 | `"no mission"` | no mission is running |
 | `"not yet counted"` | a mission is running but nobody has dealt damage yet |
 | `"local player not in the squad yet"` | `whoami()` before I/O has seen you |

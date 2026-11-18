@@ -5,7 +5,7 @@
 <p align="center"><sub><i>(By HijaKer and LilyMods)</i></sub></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.4-blue" alt="Version 1.0.4">
+  <img src="https://img.shields.io/badge/version-1.1.0-blue" alt="Version 1.1.0">
   <img src="https://img.shields.io/badge/requires-Darktide%20Mod%20Framework-c8a64a" alt="Requires Darktide Mod Framework">
   <img src="https://img.shields.io/badge/Linux-Proton-44cc11" alt="Works on Linux through Proton">
 </p>
@@ -28,7 +28,7 @@
 
 1. Install [Darktide Mod Framework](https://www.nexusmods.com/warhammer40kdarktide/mods/8).
 2. Put the `InformationOverload` folder in Darktide's `mods` folder and add `InformationOverload` to `mod_load_order.txt`, after the framework.
-3. Play a mission, then type `/io` in chat or bind **I/O's Key** in Mod Options.
+3. Play a mission, then type `/io` in chat or press **I/O's Key**, which is Tab unless you change it under **Open Information Overload** in Mod Options.
 
 Every mission will now be kept saved, as you play.
 
