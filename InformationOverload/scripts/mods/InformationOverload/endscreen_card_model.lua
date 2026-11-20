@@ -22,14 +22,14 @@ local MONTHS={"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov",
 local function day(ts)local _,m,d=tostring(ts or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)");if m and MONTHS[tonumber(m)]then return tonumber(d).." "..MONTHS[tonumber(m)]end end
 local function txt(s)return {s=s or "",syn=false}end
 local function clock(s)s=math.max(0,math.floor(s));return string.format("%d:%02d",math.floor(s/60),s%60)end
--- a time as the card writes it: the server's to the millisecond, the mission clock's to the second
-local function time_text(s,backend)if not s then return nil end;return backend and Times.format(s)or clock(s)end
+-- a time as the card writes it: the server's to the millisecond, the mission clock's to the second, an estimate to the nearest second with its ~
+local function time_text(s,backend,est)if not s then return nil end;if est then return Times.estimate_text(s)end;return backend and Times.format(s)or clock(s)end
 -- a figure as the tile rounds it, so the margin is the gap between the two figures shown and a tie shows none
-local function shown(s,time,backend)if not time then return tonumber(string.format("%.0f",s))end;if backend then return math.floor(math.max(0,s)*1000+.5)/1000 end;return math.max(0,math.floor(s))end
+local function shown(s,time,backend,est)if not time then return tonumber(string.format("%.0f",s))end;if est then return math.floor(math.max(0,s)+.5)end;if backend then return math.floor(math.max(0,s)*1000+.5)/1000 end;return math.max(0,math.floor(s))end
 -- one record or class best as a tile: the figure, what it beat and by how much, whose and where the old one was
 local function entry(tracker,e)
  local t={label=short(e.label),how=e.how}
- if e.time then t.value=time_text(e.v,e.backend);if e.prev then t.prev=time_text(e.prev,e.backend);local d=shown(e.prev,true,e.backend)-shown(e.v,true,e.backend);if d>0 then t.delta="-"..time_text(d,e.backend)end end
+ if e.time then t.value=time_text(e.v,e.backend,e.est);if e.prev then t.prev=time_text(e.prev,e.backend,e.prev_est);local d=shown(e.prev,true,e.backend,e.prev_est)-shown(e.v,true,e.backend,e.est);if d>0 then t.delta="-"..time_text(d,e.backend,e.est or e.prev_est)end end
  else t.value=commas(e.v);if e.prev then t.prev=commas(e.prev);local d=shown(e.v)-shown(e.prev);if d>0 then t.delta="+"..commas(d)end end end
  local r=e.who;if r then local wc=r.context or {};t.who=txt(clean(wc.character_name)or "Operative");t.date=day(r.started_at);if not e.time then t.mission=txt(tostring(tracker:run_mission_name(wc)))end end
  return t

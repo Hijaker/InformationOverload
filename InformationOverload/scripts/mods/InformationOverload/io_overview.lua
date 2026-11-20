@@ -96,7 +96,7 @@ function O.build(tracker,scope)
   local dmg=Records.run_useful(lr);local t=clear_time(lr)
   m.last={id=lr.id,mode=c.mode,rows={{"Map",tracker:run_mission_name(c)},{"Result",(lr.victory and "Victory"or "Defeat")..(lr.full==false and " (Partial)"or "")},
    {"Difficulty",O.diff_label(c)..(faction and " · "..faction or "")},{"Class",O.class_names[c.class]or DASH},{"Your Damage",dmg and commas(dmg)or DASH},
-   {"Clear Time",t and Times.format(t)or DASH},{"Date",lr.started_at and H.timestamp(lr.started_at)or DASH}}}
+   {"Clear Time",Times.estimate(lr)and Times.estimate_text(Times.estimate(lr))or t and Times.format(t)or DASH},{"Date",lr.started_at and H.timestamp(lr.started_at)or DASH}}}
  else m.last={rows={{"Map",DASH},{"Result",DASH},{"Difficulty",DASH},{"Class",DASH},{"Your Damage",DASH},{"Clear Time",DASH},{"Date",DASH}}}end
  local overall=Nav.overall_missions(tracker,patch,mode);local sources=Nav.mission_sources(tracker,patch,mode,overall)
  local cur,best=streak(tracker.data,patch,mode)
@@ -129,7 +129,7 @@ function O.build(tracker,scope)
  for _,maps in pairs(Times.build(timed,mode,basis()))do for _,run in pairs(maps)do local s=run.completion_time.seconds
   if not fastest or s<fastest.seconds then fastest={seconds=s,run=run}end
  end end
- m.bests[#m.bests+1]=fastest and {"Fastest Clear ("..O.diff_label(fastest.run.context)..")",Times.format(fastest.seconds),fastest.run.id}or {"Fastest Clear",DASH}
+ m.bests[#m.bests+1]=fastest and {"Fastest Clear ("..O.diff_label(fastest.run.context)..")",Times.estimate(fastest.run)and Times.estimate_text(fastest.seconds)or Times.format(fastest.seconds),fastest.run.id}or {"Fastest Clear",DASH}
  local recent={};for i=math.min(10,#scoped),1,-1 do local run=scoped[i];recent[#recent+1]={win=run.victory==true,damage=damage(run)}end
  local wins,sum,n=0,0,0;for _,r in ipairs(recent)do if r.win then wins=wins+1 end;if r.damage then sum=sum+r.damage;n=n+1 end end
  m.recent={bars=recent,wins=wins,average=n>0 and sum/n or nil,with=n}

@@ -75,9 +75,11 @@ function S:bytes(path)
  local source=self.backup_sources and self.backup_sources[path]
  return get(path)or source and get(source)or nil
 end
+-- a held job packs and encodes in parts an eighth the size, so it looks at the clock as often, as it runs on a frame's own budget
+function S:slice_size()local job=self.job;return job and job.hold and self.slice_entries/8 or self.slice_entries end
 function S:stepper()
  local job=self.job;local co=coroutine.running();if not(job and job.save and co and job.cos[co])then return nil end
- local n,limit=0,self.slice_entries;return function(k)n=n+k;if n>=limit then n=0;self:pause(true)end end
+ local n,limit=0,self:slice_size();return function(k)n=n+k;if n>=limit then n=0;self:pause(true)end end
 end
 -- There a big value is packed, then encoded a part at a time. Small parts go to the encoder together, so it runs about
 -- once a slice, and the JSON decodes to the same value as one call's would. tail lists fields already encoded as
@@ -91,7 +93,7 @@ function S:encode_sliced(value,tail)
   return table.concat(out)
  end
  local step=self:stepper();if not step then return join({self:encode(value)})end
- local json,limit,sizes,out=self.a.json,self.slice_entries,{},{}
+ local json,limit,sizes,out=self.a.json,self:slice_size(),{},{}
  local root=pack(value,nil,step,sizes)
  local function put(t)
   local size=sizes[t]or 1
@@ -172,6 +174,8 @@ function S:immutable(path,value,bytes,whole)
  local wrote;if pause then wrote=self.a.write_parts(path,bytes,pause)else wrote=self.a.write(path,bytes)end
  if not wrote then self.a.remove(path);error("Cannot write Information Overload file: "..path,0)end
  self:to_verify(path,bytes,pause and true)
+ -- a held job keeps what each file it wrote weighs, so its owner can tell what it saved
+ local job=self.job;if job and job.hold then job.sizes=job.sizes or {};job.sizes[path]=#bytes end
  return path
 end
 -- a data file written in parts is read back in parts too; the catalog's tmp is read whole, so no file the commit renames is
@@ -366,10 +370,12 @@ function S:history_load(desc,full,taken)
 end
 function S:compact_history(view,dirty,late)
  view,dirty=view or self.values,dirty or self.dirty
+ -- a held job's save pauses between matches here too, its memory having followed the catalog already; others go in one go as before
+ local held=self.job and self.job.hold
  local moved={};for _,move in ipairs(self.manifest.backup_moves or {})do moved[move.from]=move.to end
  for key,entry in pairs(self.manifest.entries)do if datasets[key]and dirty[key]then
   local data=view[key];local history=data and data.run_history
-  if history then for i,desc in ipairs(entry.history or {})do local run=history[i]
+  if history then for i,desc in ipairs(entry.history or {})do local run=history[i];if held and i%20==0 then self:pause(true)end
    -- a match still listed under the file it was read from was found unchanged when the catalog was built
    local ref=run and self.history_refs[run]
    -- and one a backup move takes is the same match under a new name, so it is not read again
@@ -398,9 +404,11 @@ function S:compact_history(view,dirty,late)
  end end
  self:release_details()
 end
+-- a match file in the Import folder, or the folder it had before, is the player's own and never written over
+local function imported_path(file)local f=file:lower();return f:sub(1,7)=="import/"or f:sub(1,22)=="reconstruction_import/"end
 function S:history_descriptor(run)
  local ref=self.history_refs[run];if not ref then return nil end
- if ref.desc.file:sub(1,22)=="reconstruction_import/"then return nil end
+ if imported_path(ref.desc.file)then return nil end
  -- a field held in memory beyond its line, set or brought in to be edited, is written with it
  for k in pairs(run)do if file_fields[k]then return nil end end
  if ref.dropped then return nil end
@@ -749,7 +757,7 @@ local function transfer(self,manifest)
  for _,move in ipairs(manifest.backup_moves or {})do if self.a.exists(move.from)then pending[#pending+1]=move end end
  for _,path in ipairs(manifest.backup_obsolete or {})do if self.a.exists(path)then obsolete[#obsolete+1]=path end end
  if not(pending[1]or obsolete[1])then return true end
- local bytes=self:encode(manifest)
+ local bytes=self:encode_sliced(manifest)
  if self.a.read("index.json.bak")~=bytes and not(self.a.write("index.json.bak",bytes)and self.a.read("index.json.bak")==bytes)then return false end
  local done=true
  for _,move in ipairs(pending)do if not self.a.move(move.from,move.to)then done=false end end
@@ -760,7 +768,7 @@ end
 -- and each catalog carries it until then. Its file is read from where it is, so saving and loading go on.
 function S:finish_backup_moves(manifest)
  if not self.a.move then return true end
- local ok,done=pcall(transfer,self,manifest)
+ local ok,done=self:try(transfer,self,manifest)
  if ok and done then
   self.backup_transfer_pending=nil;self.backup_sources=nil
   if manifest.backup_folders and self.a.remove_empty_folders then pcall(self.a.remove_empty_folders,manifest.backup_folders)end
@@ -966,7 +974,7 @@ function S:history_build(entry,data,kind,old,revision)
   local prefix=safe(run.context and run.context.patch).."/"..(kind=="general"and "match_history/"or kind=="solo"and "solo/match_history/"or "psykhanium/logs/")
   local id=safe(run.id or i);local previous=old_history[tostring(run.id)]
   local desc=self:history_descriptor(run);local ref=self.history_refs[run];local written=not desc
-  if written and ref and ref.desc.file:sub(1,22)~="reconstruction_import/"then desc,written=self:history_rewrite(run,ref,loaded_path(self,prefix..id.."-"..revision..".json"))
+  if written and ref and not imported_path(ref.desc.file)then desc,written=self:history_rewrite(run,ref,loaded_path(self,prefix..id.."-"..revision..".json"))
   elseif written then
    -- an imported match whose file has gone writes nothing and keeps its entry, so the next launch leaves it out like any missing match
    if ref then if self.detail_file==ref.desc.file then self:release_details()end;if not pcall(self.history_detail,self,ref.desc)then desc=clone(ref.desc)end end
@@ -974,7 +982,7 @@ function S:history_build(entry,data,kind,old,revision)
    if written then local mt=getmetatable(run);local value=mt and mt.io_materialize and mt.io_materialize(run)or run
     -- taken before the file is packed, so a change made while a save spread over frames runs differs from it and is saved next time
     if self.snapshots then local marks=value.completion_markers;self.snapshots[run]={snap=line_snapshot(value,self:stepper()),line=line_of(value,damage_info(value)),end_screen=type(marks)=="table"and marks.end_screen or nil}end
-    desc=self:descriptor(loaded_path(self,prefix..id.."-"..revision..".json"),value,(not ref or ref.desc.file:sub(1,22)=="reconstruction_import/")and previous or nil)
+    desc=self:descriptor(loaded_path(self,prefix..id.."-"..revision..".json"),value,(not ref or imported_path(ref.desc.file))and previous or nil)
    end
   end
   local marks=run.completion_markers;local mark=type(marks)=="table"and marks.end_screen or nil
@@ -1124,9 +1132,13 @@ function S:build(revision,checkpoint_only,values,dirty)
 end
 -- A sliced checkpoint or save runs as a job about 2 ms a frame through step().
 -- A pause marked save_only pauses a save and never a checkpoint.
+-- A held job asked to stop stops at its next pause before its catalog commit; past it, it runs on.
 function S:pause(save_only)
  local job=self.job;local co=coroutine.running()
- if job and co and job.cos[co]and(job.save or not save_only)and os.clock()-job.start>=job.budget then coroutine.yield()end
+ if not(job and co and job.cos[co]and(job.save or not save_only))then return end
+ if os.clock()-job.start>=job.budget then coroutine.yield()
+  if job.abort and job.save and not job.save.committing then error("Stopped",0)end
+ end
 end
 -- pcall for code that may pause: the game cannot yield across a pcall, so the
 -- code runs in a child coroutine whose pauses are passed up to the job.
@@ -1147,6 +1159,9 @@ function S:step(budget)
  return result,err
 end
 function S:start(f)local co=coroutine.create(f);self.job={co=co,cos={[co]=true}};return self:step()end
+-- A held job runs f over frames as its owner steps it, and its saves are spread over them, a reset, restore or import's included.
+-- Anything else that settles meanwhile asks it to stop and runs it out at once.
+function S:hold(f)local co=coroutine.create(f);self.job={co=co,cos={[co]=true},hold=true};return self.job end
 -- A save spread over frames saves the values as they were when it began, each match list copied, so a match added or
 -- taken away meanwhile waits for the next save.
 local function frozen(values)
@@ -1192,7 +1207,8 @@ local function save_body(self,checkpoint_only,state)
  local keep={};referenced(manifest,keep);referenced(self.manifest,keep)
  for _,move in ipairs(manifest.backup_moves or {})do keep[move.from]=true;keep[move.to]=true end
  manifest.owned_files={};for path in pairs(keep)do manifest.owned_files[#manifest.owned_files+1]=path end;table.sort(manifest.owned_files)
- local bytes=self:encode(manifest);self:pause(true);self:room(#bytes)
+ -- in a save spread over frames the catalog is packed and encoded a part at a time too
+ local bytes=self:encode_sliced(manifest);self:pause(true);self:room(#bytes)
  assert(self.a.write("index.json.tmp",bytes),"Cannot commit Information Overload catalog");self:to_verify("index.json.tmp",bytes);self:verify_pending()
  -- The catalog commits and memory follows it in one frame; only removing files nothing lists any more pauses after it.
  -- the catalog on disk is renamed to the backup only when it is known to be the one in memory, never after a launch from the backup
@@ -1201,6 +1217,8 @@ local function save_body(self,checkpoint_only,state)
  local disk=assert(self:read("index.json"));assert(equal(disk,manifest),"Committed catalog verification failed")
  if self.fresh_backup or not self.a.read("index.json.bak")then assert(self.a.write("index.json.bak",self:encode(manifest)),"Cannot preserve the catalog backup")end
  local previous=self.manifest;self.manifest=disk;self.index_verified=true;self.journal_active=nil;self.encoded_before_ref=nil;self.encoded_before_bytes=nil;self.encoded_before_revision=nil;local journal=drop_journal(self);self.pending=false;self.recovered=nil;self.fresh_backup=nil;self.inheritances={};self.staged_backups=nil;self.staged_missing=nil;self.undo=nil;self.prune=nil
+ -- a held job's owner follows the commit before anything pauses, so its memory and the catalog never differ across a frame
+ local held=self.job;local follow=held and held.hold and held.on_commit;if follow then held.on_commit=nil;follow()end
  self.backup_sources={}
  for _,move in ipairs(disk.backup_moves or {})do self.backup_sources[move.to]=move.from end
  self.cache={};if checkpoint_only==true then self.dirty.lifetime_records_v1=nil;state.dirty.lifetime_records_v1=nil end;if checkpoint_only~=true or state.dirty.solo_records_v1 or state.dirty.psykhanium_logs_v1 then self:compact_history(state.view,state.dirty,state.late)end;self.dirty=deferred and {lifetime_records_v1=true}or {};self.pending=deferred or false;carry_late(self,state)
@@ -1223,6 +1241,7 @@ end
 -- A save not yet committed is dropped instead: its files are taken back and what it held stays to save.
 function S:settle()
  local job=self.job;if not job then return end
+ if job.hold then local co=coroutine.running();if co and job.cos[co]then return end;job.abort=true;self:step(math.huge);return end
  if not job.save or job.save.committing then self:step(math.huge);return end
  self.job=nil;take_back(self,job.save.had,false);self.pending=true
 end
@@ -1235,6 +1254,14 @@ function S:flush(checkpoint_only,sliced)
  if not self.pending then return true end
  -- the reason a failed save gives is this save's own
  self.a.failure=nil
+ local job,co=self.job,coroutine.running()
+ if job and job.hold and co and job.cos[co]and checkpoint_only~=true then
+  if job.abort then return false,"Stopped"end
+  local state={view=frozen(self.values),dirty={},had={},late={}}
+  for key in pairs(self.dirty)do state.dirty[key]=true end;for path in pairs(self.written or {})do state.had[path]=true end
+  job.save=state;local ok,err=save_done(self,checkpoint_only,state,self:try(save_body,self,checkpoint_only,state));job.save=nil
+  return ok,err
+ end
  if checkpoint_only==true and sliced and self:journal_ready()then
   local m=self.values.unfinished_run_v1
   if not self.recovery_baselines[m.data_before]then
@@ -1388,15 +1415,21 @@ function S.game_adapter()
  function a.move(from,to)
   return directory(to)and os.rename(full(from),full(to))
  end
- function a.ensure_import_directory()return directory("reconstruction_import/")end
+ -- a folder the player made as import is the same folder on Windows, and its files are matched however its name is written
+ function a.ensure_import_directory()return directory("Import/")end
+ -- the Import folder was once reconstruction_import, which every player was given; an empty one goes, and one holding anything stays
+ function a.drop_old_import()
+  -- through the Windows call, never a shell, so no window shows; it takes only an empty folder, so matches left in it stay
+  if win and a.exists("reconstruction_import")then win.RemoveDirectoryA(windows(full("reconstruction_import")))end
+ end
  function a.read(path)local f=io.open(full(path),"rb");if not f then return nil end;local bytes=f:read("*a");f:close();return bytes end
  function a.list(folder)
-  assert(folder=="reconstruction_import/","Unsupported scan folder")
+  assert(folder=="Import/","Unsupported scan folder")
   local prefix=full(folder);local command='dir /b /s /a-d "'..prefix:gsub("/","\\")..'*.json" 2>NUL'
   local pipe=io.popen and io.popen(command,"r")
   local temporary
   if not pipe then
-   temporary="shared/reconstruction-scan.txt";assert(directory(temporary),"Cannot prepare local folder scan")
+   temporary="shared/import-scan.txt";assert(directory(temporary),"Cannot prepare local folder scan")
    os.execute(command..' >"'..full(temporary)..'"');pipe=assert(io.open(full(temporary),"r"),"Local folder scanning is unavailable")
   end
   local out={};for line in pipe:lines()do local path=line:gsub("\\","/");if path:sub(1,#root):lower()==root:lower()then out[#out+1]=path:sub(#root+1)end end;pipe:close();if temporary then os.remove(full(temporary))end;return out
@@ -1510,7 +1543,7 @@ end
 function S.bind(mod,patch,adapter)
  local active_adapter=adapter
  local attempted
- local ok,store=pcall(function()active_adapter=active_adapter or S.game_adapter();if active_adapter.import_legacy then active_adapter.import_legacy()end;if active_adapter.ensure_import_directory then active_adapter.ensure_import_directory()end;local st=S.new(active_adapter,patch);attempted=st;st.tell=function(text)mod:echo("%s",text)end;st:open();st:migrate(mod);return st end)
+ local ok,store=pcall(function()active_adapter=active_adapter or S.game_adapter();if active_adapter.import_legacy then active_adapter.import_legacy()end;if active_adapter.ensure_import_directory then active_adapter.ensure_import_directory()end;if active_adapter.drop_old_import then pcall(active_adapter.drop_old_import)end;local st=S.new(active_adapter,patch);attempted=st;st.tell=function(text)mod:echo("%s",text)end;st:open();st:migrate(mod);return st end)
  if not ok then
   local error_text=tostring(store)
   -- Fail closed: keep all existing files/settings and disable disk writes.

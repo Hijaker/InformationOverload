@@ -113,7 +113,7 @@ function Records:finish_mission(completed, victory, explicitly_count_partial)
     end
     self:complete_incidents(m)
     if not m.data_only then self:complete_mode_streak(m,victory);self:complete_mode_streak(m,victory,true);self:complete_class_win_streak(m,victory);self:complete_maelstrom(m,victory);self:complete_tallies(m,victory);self:complete_class_events(m);self:complete_boss_records(m);if victory and m.clutches and m.clutches.seen then self:best(m.context,"clutch_episodes_mission",m.clutches.episodes or 0)end;self:best(m.context,"players_left_mission",m.players_left or 0) end
-    self:record_class_overview({context=m.context,victory=victory,data_only=m.data_only,kills=m.kills,damage=m.damage,team_damage=m.team_damage,kill_categories=m.kill_categories,clutches=m.clutches})
+    self:record_class_overview({context=m.context,victory=victory,data_only=m.data_only,kills=m.kills,damage=m.damage,team_damage=m.team_damage,kill_categories=m.kill_categories,clutches=m.clutches,imported=m.imported})
     self:record_ally_overview({context=m.context,victory=victory,data_only=m.data_only,operative_clutches=m.operative_clutches})
     self:save_run(m,victory)
     if m.data_only then self.dirty=true;return true end -- data-only runs stay out of the row streaks, as a rebuild leaves them

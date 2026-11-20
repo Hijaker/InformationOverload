@@ -4,6 +4,7 @@ local base="InformationOverload/scripts/mods/InformationOverload/"
 local D=mod:io_dofile(base.."io_view_definitions")
 local Overview=mod:io_dofile(base.."io_overview")
 local Records=mod:io_dofile(base.."records")
+local Imported=mod:io_dofile(base.."imported_records")
 local Times=mod:io_dofile(base.."mission_times")
 local Nav=mod:io_dofile(base.."dashboard_navigation")
 local Sum=mod:io_dofile(base.."psyk_summary")
@@ -71,7 +72,9 @@ local STATS={{"mkills","Most Kills In A Mission"},{"mdmg","Most Damage In A Miss
  {"dodges","Melee Dodges In A Row"},{"head","Headshots In A Row"},{"kir","Kills In A Row"}}
 P.dossier_stats=STATS
 -- Most Damage is useful damage, overkill left out, as the Overview has it; the biggest hit keeps its overkill
+-- a match imported from Power DI holds none of them, unless Imported Matches Count For Records is on
 local function stat(run,k)
+ if not Imported.ranked(run)then return nil end
  local r=run.records or {}
  if k=="mkills"then return run.kills elseif k=="mdmg"then return (Records.run_useful(run))elseif k=="mboss"then return run.kill_categories and (run.kill_categories.boss or 0)or nil
  elseif k=="single"then return r.single_hit elseif k=="dodges"then return r.dodges elseif k=="head"then return r.head_combined elseif k=="kir"then return r.kills end

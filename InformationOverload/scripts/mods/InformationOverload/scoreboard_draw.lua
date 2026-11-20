@@ -80,8 +80,8 @@ end
 local function beat(t,seconds)
  local rt=S.record(t,seconds);if not rt then return nil end
  local left=t.best_clear-(t.clock_seconds or seconds)
- if left>0 then return S.clock(t.final and left or math.ceil(left)),t.final and "Under Your Old Best"or "Left To Beat Your Best",true end
- return "+"..S.clock(-left),"Over Your Best",false
+ if left>0 then return S.best_clock(t,t.final and left or math.ceil(left)),t.final and "Under Your Old Best"or "Left To Beat Your Best",true end
+ return "+"..S.best_clock(t,-left),"Over Your Best",false
 end
 -- Kills Leads: the clock on the left with a bar toward the best clear and the time to beat under it; Kills across the top of the right with
 -- its best and its mix of kinds; the two kill streaks and Downs in three cells under it, every best a grey label with a gold figure
@@ -109,7 +109,7 @@ function W.tm(pen,x,y,t,seconds,w,f)
  pen:text(seconds and S.clock(seconds)or DASH,ax,ay+22,210,80,72,C.value,"left",F.title)
  if t.best_clear then
   local cs=t.clock_seconds or seconds;bar(pen,ax,ay+112,194,cs and cs/t.best_clear or 0,C.gold)
-  pen:text("Best Clear "..GOLD..S.clock(t.best_clear).."{#reset()}",ax,ay+122,194,22,15,C.muted,"left",F.medium)
+  pen:text("Best Clear "..GOLD..S.best_clock(t,t.best_clear).."{#reset()}",ax,ay+122,194,22,15,C.muted,"left",F.medium)
   local fig,words,ahead=beat(t,seconds)
   if fig then pen:rect(ax,ay+152,194,1,C.rule,1)
    -- level with the cells' figures and their bests on the right
@@ -187,7 +187,7 @@ function W.tab(pen,x,y,t,seconds,f,_,ic)
  tx(seconds and S.clock(seconds)or DASH,23,91,200,68,62,C.value,"left",F.title)
  if t.best_clear then
   rc(24,162,188,5,C.track,1);local cs=t.clock_seconds or seconds;local k=cs and math.min(1,cs/t.best_clear)or 0;if k>0 then rc(24,162,188*k,5,C.gold,2)end
-  tx("Best Clear "..GOLD..S.clock(t.best_clear).."{#reset()}",24,173,188,16,13,C.muted)
+  tx("Best Clear "..GOLD..S.best_clock(t,t.best_clear).."{#reset()}",24,173,188,16,13,C.muted)
   local fig,words,ahead=beat(t,seconds)
   if fig then rc(24,193,188,1,C.rule,1)
    tx(fig,24,200,188,26,24,ahead and C.gold or C.muted,"left",F.title)

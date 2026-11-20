@@ -30,10 +30,10 @@ end
 function S.below(sw,sh,lines,box)
  local _,y=S.left(0,245+(box or 60+lines*29+8)+16,sw,sh);return y
 end
--- With the Tab overlay up the held Tracker Panel is 800x250 at its place, unmoved the overlay's empty top right corner, 11 in, down to just above
--- Penances, level with Active Indulgences (the overlay's side panels' top plus 180); the overlay keeps its own mission block in the other corner.
+-- The held Tracker Panel has one shape and size, Tab overlay up or down, alive or dead: 800x250 at its place, unmoved the overlay's empty top right
+-- corner, 11 in, down to just above Penances, level with Active Indulgences (the overlay's side panels' top plus 180).
 -- A shorter screen scales it whole to fit; returns x, y, scale, whether the kill kinds show, and the size.
--- the size picked in Settings for the Tab overlay's Tracker Panel, a whole percent of its full 800 by 250, or nil to fit above Penances
+-- the size picked in Settings for the held Tracker Panel, a whole percent of its full 800 by 250, or nil to fit above Penances
 S.TAB_SIZE={min=50,max=120}
 function S.tab_size(get)local v=tonumber(get("scoreboard_tab_size"));if not v then return nil end;return math.max(S.TAB_SIZE.min,math.min(S.TAB_SIZE.max,math.floor(v+.5)))end
 function S.tab_slot(sw,sh,get)
@@ -85,8 +85,8 @@ end
 -- Sizes in UI units; the squad box grows with the number of players, and the Squad Table and Squad Cards with Extra Stats on.
 function S.size(kind,layout,n,record,extra)
  n=math.max(1,math.min(4,n or 4))
- -- the Tracker Panel keeps one size: the time to beat sits under its clock, not in a row of its own; beside the Esc menu it matches the
- -- menu's 370 height and reaches as far right as the menu sits in from the left
+ -- the end screen's Tracker Panel keeps one size: the time to beat sits under its clock, not in a row of its own; beside the Esc menu it
+ -- matches the menu's 370 height and reaches as far right as the menu sits in from the left
  if kind=="tm_esc"then return S.ESC_TM[1],S.ESC_TM[2]end
  if kind=="tm"then return 700,312 end
  if layout=="table"then if extra then return 1010,96+n*84 end;return 950,62+n*58 end
@@ -125,33 +125,27 @@ end
 -- the Tracker Panel on the end screen rests just above the squad, centred on it
 function S.end_tm_place(sw,x,y,w,tw,th)return clamp(x+(w-tw)/2,0,sw-tw),math.max(0,y-th-12)end
 function S.fraction(px,py,sw,sh,w,h)return clamp(px,0,sw-w)/sw,clamp(py,0,sh-h)/sh end
--- Where the held Tracker Panel, or with squad the squad, shows with the game's Tab overlay up ("tab") or down ("plain"), the usual one first, nil
--- for no second: holding Tab as I/O's key always raises the overlay, while a tapped-on scoreboard, another key or being dead leaves it down until
--- Tab is held over it; the squad never shows while dead, and the panel shows held only with This Mission on
-function S.tm_shapes(o,tab_key,squad)
+-- Where the squad shows with the game's Tab overlay up ("tab") or down ("plain"), the usual one first, nil for no second: holding Tab as I/O's
+-- key always raises the overlay, while a tapped-on scoreboard or another key leaves it down until Tab is held over it
+function S.squad_shapes(o,tab_key)
  local hold_tab=tab_key==true and not o.own_key and (o.key=="hold_board"or o.key=="hold_only")
- if hold_tab and (squad or o.this_mission)then return "tab",not squad and o.dead and "plain"or nil end
+ if hold_tab then return "tab"end
  return "plain","tab"
 end
--- the held Tracker Panel's box in a shape, at its place: the Tab overlay's slot, or its own panel at its tallest, so a best-clear line never moves it
-function S.tm_box(shape,sw,sh,get)
- if shape=="tab"then local x,y,_,_,w,h=S.tab_slot(sw,sh,get);return x,y,w,h end
- local w,h=S.size("tm",nil,nil,true);local x,y=S.place("tm",get,sw,sh,w,h);return x,y,w,h
-end
 -- What the Move screen shows for kind, every place read as the HUD reads it through get: first the box, in the shape and place it usually shows,
--- then an outline wherever it shows instead, each {x,y,w,h,label,say,strip}, strip marking a Tracker Panel whose bottom 50 shows only with a best clear.
+-- then for the squad an outline wherever it shows instead, each {x,y,w,h,label,say,strip}, strip marking a Tracker Panel whose bottom 50 shows only with a best clear.
 -- below is how far down an unmoved squad starts under this mission's Special Condition with the Tab overlay up, where that is known.
 function S.move_boxes(kind,o,tab_key,layout,n,sw,sh,get,below)
- local main,other=S.tm_shapes(o,tab_key,kind=="squad");local out={}
+ local out={}
  local SAY={["With The Tab Overlay"]="with the Tab overlay up",["Without The Tab Overlay"]="without the Tab overlay"}
  local function add(x,y,w,h,label,strip)out[#out+1]={x=x,y=y,w=w,h=h,label=label,say=SAY[label],strip=strip}end
- if kind=="tm"then
-  for _,shape in ipairs({main,other})do local x,y,w,h=S.tm_box(shape,sw,sh,get);add(x,y,w,h,shape=="tab"and "With The Tab Overlay"or "Without The Tab Overlay",shape=="plain")end
+ if kind=="tm"then local x,y,_,_,w,h=S.tab_slot(sw,sh,get);add(x,y,w,h)
  elseif kind=="tm_esc"then local w,h=S.size("tm_esc",nil,nil,true);local x,y=S.place("tm_esc",get,sw,sh,w,h);add(x,y,w,h,nil,true)
  else
   local extra=o.extra and S.EXTRA[layout]==true;local w,h=S.size("squad",layout,n,true,extra)
   local px,py,pf=S.squad_place(get,sw,sh,w,h,nil,extra);local tx,ty,tf=S.squad_place(get,sw,sh,w,h,below,extra)
   local plain,tab={px,py,S.squad_wide(sw,px,w,pf,layout,extra)or w*pf,h*pf,"Without The Tab Overlay"},{tx,ty,S.squad_wide(sw,tx,w,tf,layout,extra)or w*tf,h*tf,"With The Tab Overlay"}
+  local main,other=S.squad_shapes(o,tab_key)
   if main=="tab"then add(unpack(tab));if other then add(unpack(plain))end else add(unpack(plain));if other then add(unpack(tab))end end
  end
  -- an outline where the box already is says nothing
@@ -161,6 +155,8 @@ function S.move_boxes(kind,o,tab_key,layout,n,sw,sh,get,below)
 end
 function S.commas(n)local s=string.format("%.0f",n or 0);local r=s:reverse():gsub("(%d%d%d)","%1,"):reverse();return (r:gsub("^,",""))end
 function S.clock(s)s=math.max(0,math.floor(s));return string.format("%d:%02d",math.floor(s/60),s%60)end
+-- a time measured against a best clear that is an estimate: marked with a ~ and to the nearest second, as every estimate shows
+function S.best_clock(tm,s)if tm.best_clear_est then return "~"..S.clock(s+.5)end;return S.clock(s)end
 -- a name cut to n characters, never through the middle of one
 function S.cut(s,n)
  s=tostring(s or "");local count,i=0,1
@@ -171,10 +167,12 @@ end
 local CATS={{"horde_melee","Melee Horde"},{"horde_ranged","Ranged Horde"},{"elite","Elite"},{"special","Special"},{"boss","Boss"}}
 S.CATS=CATS
 -- Bests from the saved history, worked out once a mission, again once it is over and again when the server's time for it arrives: the fastest clear and the most kills on this map, difficulty and mode.
+-- a match imported from Power DI is one to beat only while Imported Matches Count For Records is on
 local function bests(src,deps,c)
  local cache,final,backend=src.cache,src.final==true,src.backend==true
- if cache.mission==src.m and cache.basis==src.basis and cache.final==final and cache.backend==backend then return cache end
- cache.mission,cache.basis,cache.final,cache.backend,cache.clear,cache.kills,cache.clear_clock=src.m,src.basis,final,backend,nil,nil,nil
+ local I=deps.Imported;local imports=I~=nil and I.on()
+ if cache.mission==src.m and cache.basis==src.basis and cache.final==final and cache.backend==backend and cache.imports==imports then return cache end
+ cache.mission,cache.basis,cache.final,cache.backend,cache.imports,cache.clear,cache.kills,cache.clear_clock,cache.clear_est=src.m,src.basis,final,backend,imports,nil,nil,nil,nil
  local history=src.tracker and src.tracker.data and src.tracker.data.run_history;local skip=src.exclude
  -- a finished mission is already saved, so its bests are the ones from before it
  if skip then local kept={};for _,run in ipairs(history or {})do if run.id~=skip then kept[#kept+1]=run end end;history=kept end
@@ -184,8 +182,10 @@ local function bests(src,deps,c)
  cache.clear=t and (t.source=="backend")==backend and t.seconds or nil
  -- with the server's time in and no best the server timed, the mission clock's best stays, set against this mission's own mission clock
  if not cache.clear and t and backend and t.source~="backend"then cache.clear,cache.clear_clock=t.seconds,true end
+ -- an imported match's estimate, which shows marked as one
+ cache.clear_est=cache.clear~=nil and deps.Times.estimate~=nil and deps.Times.estimate(best)~=nil or nil
  for _,run in ipairs(src.tracker and deps.runs(src.tracker)or {})do local rc=run.context or {}
-  if (skip==nil or run.id~=skip)and rc.mission_name==c.mission_name and rc.mode==c.mode and tostring(rc.difficulty)==tostring(c.difficulty)and type(run.kills)=="number"then cache.kills=math.max(cache.kills or 0,run.kills)end
+  if (skip==nil or run.id~=skip)and (imports or not run.imported)and rc.mission_name==c.mission_name and rc.mode==c.mode and tostring(rc.difficulty)==tostring(c.difficulty)and type(run.kills)=="number"then cache.kills=math.max(cache.kills or 0,run.kills)end
  end
  return cache
 end
@@ -202,7 +202,7 @@ local function this_mission(src,deps,c,counts)
  if segs and segs[#segs]and segs[#segs].health_streak then t.health_streak=segs[#segs].health_streak.current end
  t.kills=type(m.kills)=="number"and m.kills or 0;t.cats={}
  local k=m.kill_categories or {};for i,e in ipairs(CATS)do t.cats[i]={e[2],k[e[1]]or 0}end
- local b=bests(src,deps,c);t.best_clear,t.kills_best=b.clear,b.kills
+ local b=bests(src,deps,c);t.best_clear,t.kills_best,t.best_clear_est=b.clear,b.kills,b.clear_est
  if b.clear_clock then local ct=m.completion_time;t.clock_seconds=ct and ct.source=="mission_clock"and ct.seconds or nil;if not t.clock_seconds then t.best_clear=nil end end
  t.full=m.full~=false;t.final=src.final==true;t.won=m.completion_time~=nil
  return t
@@ -222,7 +222,8 @@ local TOP={"damage","kills","elites","specials","boss","weak","crit","lesser","m
 local KINDS={"lesser","elites","specials","monst"}
 local function support(src,r,id)
  local all=src.m.support;local mine=all and all[id];local none=(all or not src.saved)and 0 or nil
- for _,f in ipairs(S.SUPPORT)do r[f]=mine and mine[f]or none end
+ -- a figure the match did not keep, as an imported match's dodges, is drawn as a dash
+ for _,f in ipairs(S.SUPPORT)do if mine then r[f]=mine[f]else r[f]=none end end
  -- time in coherency as a share of the time alive in the mission; a match saved before that was kept shows its time
  r.tracked=mine and mine.tracked or nil
  if r.tracked and r.tracked>0 then r.coherency_share=math.min(1,(r.coherency or 0)/r.tracked)elseif not src.saved and (r.tracked or 0)==0 then r.coherency_share=0 end
@@ -277,8 +278,8 @@ function S.record(tm,seconds)
  seconds=tm.clock_seconds or seconds
  if not tm.full or not tm.best_clear or not seconds or tm.final and not tm.won then return nil end
  local left=tm.best_clear-seconds
- if tm.final and left>0 then return "New Best Clear",S.clock(left).." under your old best clear",true end
- if left>0 then return "Record In Reach",S.clock(math.ceil(left)).." to beat your best clear",true end
- return "Best Clear Passed",S.clock(-left).." over your best clear",false
+ if tm.final and left>0 then return "New Best Clear",S.best_clock(tm,left).." under your old best clear",true end
+ if left>0 then return "Record In Reach",S.best_clock(tm,math.ceil(left)).." to beat your best clear",true end
+ return "Best Clear Passed",S.best_clock(tm,-left).." over your best clear",false
 end
 return S

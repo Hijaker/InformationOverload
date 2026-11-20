@@ -137,7 +137,7 @@ local function clears_card(view,cv,ch,y)
   view:_jump(cv,x+8,yy+7,P.open_run(view,c.run.id))
   local sub=c.label..(c.mael and ", Maelstrom"or "").." · "..P.dm(c.run.started_at)..(c.n>1 and " · Best Of "..c.n or "")
   cv:text(c.map,x+36,yy+2,226,20,15,c.st=="lost"and C.label or C.value);cv:text(sub,x+36,yy+19,226,16,13,C.muted,"left",F.medium)
-  if c.st=="time"then cv:rect(bx,yy+16,math.max(2,bw*c.s/mx),4,C.label);cv:text(Times.format(c.s),x+W-163,yy,150,36,15,C.value,"right")
+  if c.st=="time"then cv:rect(bx,yy+16,math.max(2,bw*c.s/mx),4,C.label);cv:text(Times.estimate(c.run)and Times.estimate_text(c.s)or Times.format(c.s),x+W-163,yy,150,36,15,C.value,"right")
   else cv:text(c.st=="won"and (c.partial and "Won, Partial"or "Won")or "Lost",x+W-163,yy,150,36,15,c.st=="lost"and C.muted or C.value,"right")end
   cv:rect(x+25,yy+35,W-38,1,C.line,true);yy=yy+36
  end

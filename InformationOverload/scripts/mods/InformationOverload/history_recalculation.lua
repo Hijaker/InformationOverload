@@ -157,10 +157,14 @@ function H.rebuild(R,baseline,data,policy,read_only,pause)
  apply_carries(0)
  -- Exclusion flags land together at the end, so pages read between pauses never see half a replay.
  local flags={}
- for _,run in ipairs(runs)do if pause then pause()end;apply_carries((run.id or 1)-1);local excluded=not H.enabled(run,policy);if not read_only then flags[run]=excluded end;local c=run.context
+ -- an imported or added match sits among the others by date but takes a number after them, so the carries go by the highest number this PC played so far;
+ -- one from Power DI counts for streaks, tallies and totals, and sets a best only while Imported Matches Count For Records is on
+ local reached=0;local function no_best()return false end
+ for _,run in ipairs(runs)do if pause then pause()end;local imported=type(run.imported)=="table";local placed=imported or run.import_added==true;apply_carries(placed and reached or (run.id or 1)-1);if not placed then reached=math.max(reached,run.id or 0)end
+  local excluded=not H.enabled(run,policy);if not read_only then flags[run]=excluded end;local c=run.context
   if not excluded and c and not c.training_history_test and (c.difficulty~="psykhanium"or run.hidden_contributions)and c.difficulty~="TEST ONLY"then
    local m=replay_mission(run,R);m.failed=m.failed or {};m.legacy_controls=not c.combat_tracking_v56;local own=run.incidents and run.incidents.personal or {};for field,event in pairs({downs="knocked_down",deaths="died",pounces="dog_pounced",nets="trapper_netted",mutant_charges="mutant_charged"})do if (own[field]or 0)>0 then m.failed[event]=true end end;m.full=true;m.id=nil;m.data_before=nil;m.recalculating=true;m.record_updates={};m.enemy_updates={};m.history_recorded=nil;m.interrupted=false;m.record_credits=credits[run.id]
-   r.mission=m
+   r.mission=m;if imported and not (R.ranked and R.ranked(run))then r.best,r.incident_record=no_best,no_best end
    local contribution=run.contributions
    if contribution and run.id>(baseline.run_sequence or 0)then
     for _,entry in ipairs(contribution.blo_contexts or {})do local bc=entry.context;r:rows_for(bc);r:initialize_blo_prefix(r:blo_buckets(bc));r.data.blo_weapons=r.data.blo_weapons or {};local patch=tostring(bc.patch);r.data.blo_weapons[patch]=r.data.blo_weapons[patch]or {};local child=R.new(r.data.blo_weapons[patch][bc.weapon]);child.blo_weapon_only=true;child:rows_for(bc);child:initialize_blo_prefix(child:blo_buckets(bc));r.data.blo_weapons[patch][bc.weapon]=child.data end
@@ -188,6 +192,7 @@ function H.rebuild(R,baseline,data,policy,read_only,pause)
    else r.mission=nil end
    for _,update in ipairs(m.record_updates or {})do if update.row.best[update.name]==update.value then update.row.best_runs[update.name]=run.id end end
    for _,update in ipairs(m.enemy_updates or {})do local hit=update.row.enemy_hits and update.row.enemy_hits[update.enemy];if hit and hit.damage==update.value then hit.run_id=run.id end end
+   r.best,r.incident_record=nil,nil
   end
  end
  local held=r.mission;r.mission=nil

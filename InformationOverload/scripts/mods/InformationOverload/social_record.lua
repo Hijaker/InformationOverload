@@ -3,6 +3,7 @@ local mod=get_mod("information_overload")
 local base="InformationOverload/scripts/mods/InformationOverload/"
 local Overview=mod:io_dofile(base.."io_overview")
 local Records=mod:io_dofile(base.."records")
+local Imported=mod:io_dofile(base.."imported_records")
 local Warm=mod:io_dofile(base.."warm_parts")
 local I=mod:io_dofile(base.."player_identity")
 local R={}
@@ -110,7 +111,7 @@ end
 function R.best_damage(tracker,m)
  local top
  for _,s in ipairs(m.shared)do local h=heavy[s.run];if not h then return nil,true end
-  if h.members then local n,any=0,false;for k in pairs(s.keys)do local v=h.members[k];if v then n=n+v;any=true end end
+  if h.members and Imported.ranked(s.run)then local n,any=0,false;for k in pairs(s.keys)do local v=h.members[k];if v then n=n+v;any=true end end
    if any and n>0 and (not top or n>top.v)then top={v=n,s=s}end end
  end
  if not top then return nil end

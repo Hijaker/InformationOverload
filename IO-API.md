@@ -92,7 +92,7 @@ A number doesn't mean a slot. `api.player_damage(1)` finds no one.
 local live, history = api.revision()
 ```
 
-Two numbers that only ever go up. `live` goes up when anything `squad()`, `player_damage()`, `roster()`, `whoami()` or `streaks()` would show has changed: damage, kills, downs, deaths, who's in the squad, your streaks. `history` goes up when a match is saved, deleted or recounted, a clear time is edited, history is rebuilt, imported or restored, or the Boss timing setting is changed.
+Two numbers that only ever go up. `live` goes up when anything `squad()`, `player_damage()`, `roster()`, `whoami()` or `streaks()` would show has changed: damage, kills, downs, deaths, who's in the squad, your streaks. `history` goes up when a match is saved, deleted or recounted, a clear time is edited, history is rebuilt, imported or restored, or the Boss timing setting or Imported Matches Count For Records is changed.
 
 `mission()`'s `tracked_seconds` counts up until the mission is won, or the boss dies with Boss timing on, without moving `live`, so read `mission()` directly when you want a timer.
 
@@ -246,7 +246,8 @@ Each match in `matches`:
 | `victory` | `true` for a win, `false` for a loss |
 | `full` | `false` if I/O only saw part of it |
 | `started_at` | when it started, as local date and time text like `"2026-11-08 14:02:11"` |
-| `seconds` | how long it took, if I/O knows |
+| `seconds` | how long it took, if I/O knows; a match imported from Power DI has only an estimate, so it gives none here |
+| `imported` | `true` for a match imported from Power DI. I/O counts these in totals, averages and streaks, but they hold no records or bests unless the player switches on Imported Matches Count For Records (the setting `imported_records`), so leave them out of your records too unless it's on |
 | `mission`, `display_name` | the mission's internal and shown names |
 | `difficulty`, `mode`, `patch` | as in [mission](#mission) |
 | `class`, `character`, `character_name` | who you played |
@@ -278,6 +279,8 @@ Frontend contract 2 (I/O 1.0.4): a saved match keeps what I/O's pages read, and 
 - `enemy_kill_counts.members[]` keeps `personal` and `enemy_kills`, without `class`.
 - `damage` tallies no longer count `health_hits`.
 - `team_damage.minutes`, in matches played since it was added, holds each operative's useful damage and kills by minute of the mission, read back as `{version, origin_ms, count, start, members = {[character_id] = {useful = {...}, kills = {...}}}}`. Each array is `count` long, minute `k` at `[k + 1]`, running from minute 0 to the last minute anyone has a figure in; a minute with nothing is `0`. `start` is how many seconds after the match's 0:00 minute 0 begins, which is `0` unless the minutes were counted from another start. Useful damage is in whole numbers, rounded so the minutes add up to the operative's total. A match from before they were kept has no `minutes`, and a match joined from two parts has the parts added minute by minute.
+- A match imported from Power DI has `imported = {from = "power_di", session, version}`: `session` is Power DI's id for the mission, the same as `context.mission_instance`, and `version` the Power DI version that saved it. A match played with I/O has no `imported`.
+- A win imported from Power DI keeps `completion_time = {seconds, source = "power_di_estimate"}`, an estimate worked out from where Power DI's data stops. I/O shows it with a leading `~` and leaves it out of every best clear, record and average; do the same. With Imported Matches Count For Records on (`get_mod("information_overload"):get("imported_records") == true`), I/O counts it as a clear time in all of them, still shown with its `~`.
 - `experimental` is gone from saved matches, and the old research blocks `talent_calibration`, `compact_damage_test`, `hyperviolence_poc`, `performance`, `damage_diagnostics` and `talent_test` with it.
 
 A match the tidy has not reached yet is handed out as it was saved, so it may still carry the parts above and every reset in `streak_events`: read downs and deaths by their cause. A saved timeline segment comes with its hits read back under `events`, as the seven-number tuples above, though it keeps `version = 3`.

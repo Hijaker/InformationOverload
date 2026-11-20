@@ -1,6 +1,12 @@
 -- Reset moves the saved statistics into a backup and Restore brings backups back; each lands in one catalog commit, so a crash leaves it done or not done.
 local B={}
 B.KEYS={"lifetime_records_v1","solo_records_v1","psykhanium_logs_v1","history_baseline_v1","friend_summaries_v1"}
+-- the Power DI sessions already imported, kept apart from the history so a deleted import stays deleted
+B.POWERDI="powerdi_imported_v1"
+-- the ones the player deleted from Match History, written by history_deletion.lua's D.remember
+B.POWERDI_DELETED="powerdi_deleted_v1"
+-- matches deleted for good from their own page, written by history_deletion.lua's D.forget
+B.DELETED="history_deleted_v1"
 local SETS={lifetime="lifetime_records_v1",solo="solo_records_v1",logs="psykhanium_logs_v1",baseline="history_baseline_v1"}
 local function count(d)local n=0;for _,run in ipairs(d and d.run_history or {})do if not run.hidden_contributions then n=n+1 end end;return n end
 local function held(d)return d and (next(d.rows or {})or next(d.run_history or {}))and true or false end
@@ -11,12 +17,29 @@ local function same(a,b)local x,y=a.context or {},b.context or {};return x.missi
 local function store(storage,s)for k,key in pairs(SETS)do storage:set(key,s[k])end;storage:set("friend_summaries_v1",s.friends or {})end
 -- the save before a reset or import may be the first into Loaded Data/, so its folders are made by one mkdir, not one at a time as it writes
 local function prepare(storage)if storage.prepare_folders then storage:prepare_folders()end end
+-- the missions a backup holds, by session, so a Power DI import can skip them without opening it
+local function instances(d)local out={};for _,run in ipairs(d and d.run_history or {})do local c=run.context;if type(c)=="table"and c.mission_instance~=nil then out[#out+1]=c.mission_instance end end;return out end
 local function day(s)local y,m,d=tostring(s or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)");return y and d.."/"..m.."/"..y or "an unknown day"end
 function B.matches(n)return n==1 and "1 match"or tostring(n or 0).." matches"end
 -- "the backup from 27/10/2026, 42 matches" or "all 3 backups, 120 matches"
 function B.describe(list,all)
  if all and #list>1 then local n=0;for _,b in ipairs(list)do n=n+(b.matches or 0)end;return "all "..#list.." backups, "..B.matches(n)end
  local b=list[#list]or {};return "the backup from "..day(b.made)..", "..B.matches(b.matches)
+end
+-- The highest match number anything on this PC still holds: the history, its patch carries, the baseline, a missing match file, and every
+-- backup's history and imported numbers, or for a backup from before match history the numbers it used. An import numbers after it, so a number nothing holds any more is given again.
+function B.top(storage,d,baseline)
+ local n=tonumber(baseline and baseline.run_sequence)or 0
+ local function up(id)n=math.max(n,tonumber(id)or 0)end
+ for _,run in ipairs(d and d.run_history or {})do up(run.id);for _,id in ipairs(run.merged_segment_ids or {})do up(id)end end
+ for _,c in ipairs(d and d.history_patch_carries or {})do up(c.after_run)end;up(d and d.history_damage_reset_after)
+ local function lost(list)for _,r in ipairs(list or {})do if r.key==SETS.lifetime and r.match then up(r.id)end end end
+ lost(storage.manifest and storage.manifest.missing);lost(storage.skipped)
+ for _,b in ipairs(storage.backups and storage:backups()or {})do lost(b.missing);for _,id in ipairs(b.merged or {})do up(id)end
+  local e=b.entries and b.entries[SETS.lifetime];for _,desc in ipairs(e and e.history or {})do up(desc.id)end
+  if e and not e.history_present then up(b.seq and b.seq.lifetime)end
+ end
+ return n
 end
 -- The highest match number a backup used: the counters carry on from it, so a number is never reused.
 function B.floor(storage,k)local n=0;for _,b in ipairs(storage.backups and storage:backups()or {})do n=math.max(n,b.seq and b.seq[k]or 0)end;return n end
@@ -31,40 +54,49 @@ function B.reset(storage,R,H,state,now)
  life.friend_tracking=H.clone(state.lifetime.friend_tracking);life.friend_tracking_revision=(state.lifetime.friend_tracking_revision or 0)+1
  local baseline=H.baseline(life);baseline.run_sequence=0
  local kept=held(state.lifetime)or held(state.solo)or held(state.logs)or legacy(state.baseline)
- storage:stash(B.KEYS,kept and {made=now,matches=count(state.lifetime)+count(state.solo),logs=count(state.logs),seq=seq}or nil)
+ storage:stash(B.KEYS,kept and {made=now,matches=count(state.lifetime)+count(state.solo),logs=count(state.logs),seq=seq,instances=instances(state.lifetime)}or nil)
  store(storage,{lifetime=out.lifetime.data,solo=out.solo.data,logs=out.logs.data,baseline=baseline})
  if not storage:flush()then storage:unstage();store(storage,state);return nil,"Saving failed, so nothing was reset."end
  out.baseline=baseline;out.kept=kept;return out
 end
--- Import keeps the matches it replaces as a backup made in the same commit, and returns the highest number they used.
-function B.import(storage,state,now)
+-- An import keeps the history it adds to as a backup made in the same commit, naming what it brought in, so restoring it takes them back out:
+-- a Power DI import its missions by session, Import Match History its matches by number. Returns the highest number this PC has used.
+local function added(storage,state,now,field,list,n)
  if not storage.stash then return nil,"Saving is off, so nothing was imported."end
  storage:set(SETS.lifetime,state.lifetime);prepare(storage);if not storage:flush()then return nil,"Your statistics could not be saved, so nothing was imported."end
- local lost=false;for _,r in ipairs(storage.manifest and storage.manifest.missing or {})do if r.key==SETS.lifetime and r.match then lost=true end end
  local seq=math.max(state.lifetime.run_sequence or 0,B.floor(storage,"lifetime"))
- local info=(held(state.lifetime)or lost)and {made=now,matches=count(state.lifetime),logs=0,seq={lifetime=seq},import=true}or false
- storage:stash({SETS.lifetime,"friend_summaries_v1"},info or nil);return info,seq
+ local info={made=now,matches=count(state.lifetime),logs=0,seq={lifetime=seq},[field]=list,added=n,instances=instances(state.lifetime)}
+ storage:stash({SETS.lifetime,"friend_summaries_v1"},info);return info,seq
 end
+function B.import(storage,state,now,ids,n)return added(storage,state,now,"merged",ids,n)end
+function B.powerdi(storage,state,now,sessions)return added(storage,state,now,"powerdi",sessions)end
+-- deleting matches from Match History keeps the history they were in, so restoring it brings them back
+function B.deleted(storage,state,now,ids)return added(storage,state,now,"deleted",ids)end
+local function imported(run,drop,ids)return drop and type(run.imported)=="table"and drop[run.imported.session]or ids and ids[run.id]or false end
 -- Sets go oldest first, the current statistics last. Matches join by number; a dataset only one set holds anything of is taken whole, so a restore into an empty reset gives back exactly what was saved, and otherwise its statistics are rebuilt from every match.
-function B.merge(d,policy,sets)
+-- drop names Power DI sessions and ids the numbers of matches Import Match History added; those matches leave every set, and their statistics are rebuilt without them.
+function B.merge(d,policy,sets,drop,ids,gone)
  local R,H=d.R,d.H;local now=sets[#sets];local out={}
  for _,s in ipairs(sets)do if held(s.lifetime)and legacy(s.baseline)then
   assert(not out.baseline,"Two sets of statistics from before match history cannot be combined, so nothing was restored.");out.baseline=s.baseline
  end end
  out.baseline=out.baseline or now.baseline or {schema=R.schema or 1,rows={},run_sequence=0,history_legacy_patches={}}
  for _,k in ipairs({"lifetime","solo","logs"})do
-  local full,seq,rev,history,seen={},0,0,{},{}
+  local full,seq,rev,history,seen={},0,0,{},{};local dropped=false
   for _,s in ipairs(sets)do local x=s[k]
    if x then seq=math.max(seq,x.run_sequence or 0);rev=math.max(rev,x.history_policy_revision or 0)
     for _,run in ipairs(x.run_history or {})do local id=run.id or 0;seq=math.max(seq,id)
-     if seen[id]then assert(same(seen[id],run),"Two different matches share number "..tostring(id)..", so nothing was restored.")else seen[id]=run;history[#history+1]=run end
+     local lost=gone and type(gone[k])=="table"and gone[k][tostring(id)]
+     if (k=="lifetime"and imported(run,drop,ids))or (lost and lost==tostring(run.started_at))then dropped=true
+     elseif seen[id]then assert(same(seen[id],run),"Two different matches share number "..tostring(id)..", so nothing was restored.")else seen[id]=run;history[#history+1]=run end
     end
     if not empty(x)then full[#full+1]=x end
    end
   end
-  table.sort(history,function(a,b)return (a.id or 0)<(b.id or 0)end)
+  -- by number, with imported and added matches among them by date, as the import placed them
+  if d.I and d.I.order then d.I.order(history)else table.sort(history,function(a,b)return (a.id or 0)<(b.id or 0)end)end
   local data
-  if #full>1 and k~="logs"then
+  if (#full>1 or dropped)and k~="logs"then
    local source={schema=R.schema or 1,rows={},run_history=history,run_sequence=seq,record_credits={}};local carries,known,names={},{},{}
    for _,s in ipairs(sets)do for id,by in pairs(R.record_credits and R.record_credits(s[k]and s[k].rows)or {})do source.record_credits[id]=by end end
    for _,s in ipairs(sets)do local x=s[k]or {}
@@ -100,10 +132,12 @@ end
 -- Restored backups leave the list; their missing match files go back on the missing list, so one that turns up again is read on the next launch.
 function B.restore(storage,d,policy,state,all)
  local list=storage.backups and storage:backups()or {};if not list[1]then return nil,"There are no backups to restore."end
- local first=all and 1 or #list;local brought=0
+ local first=all and 1 or #list;local brought=0;local drop,ids
  local ok,merged,carry=pcall(function()
   local sets,carry={},{}
   for i=first,#list do local values,lost=storage:backup_load(list[i]);brought=brought+(list[i].matches or 0)
+   for _,id in ipairs(list[i].powerdi or {})do drop=drop or {};drop[id]=true end
+   for _,id in ipairs(list[i].merged or {})do ids=ids or {};ids[id]=true end
    -- Lost lifetime records are rebuilt from the matches, so only a lifetime with match history can do without them.
    local life=(list[i].entries or {}).lifetime_records_v1
    for _,r in ipairs(lost)do assert(r.match or r.key=="lifetime_records_v1"and life and life.history_present,"Part of the backup could not be read, so nothing was restored.");if r.match then carry[#carry+1]=r end end
@@ -111,17 +145,40 @@ function B.restore(storage,d,policy,state,all)
    local s={};for k,key in pairs(SETS)do s[k]=values[key]end;sets[#sets+1]=s
   end
   sets[#sets+1]=state
-  return B.merge(d,policy,sets),carry
+  local gone=storage:get(B.DELETED)
+  return B.merge(d,policy,sets,drop,ids,type(gone)=="table"and gone or nil),carry
  end)
  if not ok then return nil,(tostring(merged):gsub("^.-:%d+: ",""))end
  local keep={};for i=1,first-1 do keep[i]=list[i]end
  storage:stage(keep,carry[1]and carry or nil);store(storage,merged)
- if not storage:flush()then storage:unstage();store(storage,state);return nil,"Saving failed, so nothing was restored."end
+ -- the missions taken back out are forgotten as imported, so the next Power DI import brings them in again
+ local known=storage:get(B.POWERDI)
+ if drop and type(known)=="table"then local left={};for id in pairs(known.sessions or {})do if not drop[id]then left[id]=true end end;storage:set(B.POWERDI,{sessions=left})end
+ -- and one the player deleted is no longer remembered as deleted when the import that brought it is undone or the restore brings it back
+ local gone=storage:get(B.POWERDI_DELETED);local ungone=false
+ if type(gone)=="table"and type(gone.sessions)=="table"then
+  local back={};for _,run in ipairs(merged.lifetime and merged.lifetime.run_history or {})do if type(run.imported)=="table"and run.imported.session~=nil then back[run.imported.session]=true end end
+  local left={};for id in pairs(gone.sessions)do if (drop and drop[id])or back[id]then ungone=true else left[id]=true end end;if ungone then storage:set(B.POWERDI_DELETED,{sessions=left})end
+ end
+ if not storage:flush()then storage:unstage();store(storage,state);if drop and type(known)=="table"then storage:set(B.POWERDI,known)end;if ungone then storage:set(B.POWERDI_DELETED,gone)end;return nil,"Saving failed, so nothing was restored."end
  return merged,brought
 end
-function B.delete(storage)
+-- A Power DI import only a backup held goes with it, so the next import brings it in again; one the player deleted from the history stays deleted.
+function B.delete(storage,history)
  if not (storage.backups and storage:backups()[1])then return nil,"There are no backups to delete."end
- if not storage:delete_backups()then return nil,"Saving failed, so the backups were not deleted."end
+ -- a held import still saving is settled first, so its own undo has put the imported list back before it is read here
+ if storage.settle then storage:settle()end
+ local known=storage:get(B.POWERDI);local changed=false
+ if type(known)=="table"and type(known.sessions)=="table"then
+  local gone=storage:get(B.POWERDI_DELETED);local here,held,left={},{},{}
+  for id in pairs(type(gone)=="table"and type(gone.sessions)=="table"and gone.sessions or {})do here[id]=true end
+  for _,run in ipairs(history or {})do if type(run.imported)=="table"and run.imported.session~=nil then here[run.imported.session]=true end end
+  for _,b in ipairs(storage:backups())do for _,id in ipairs(b.instances or {})do held[id]=true end end
+  for id in pairs(known.sessions)do if held[id]and not here[id]then changed=true else left[id]=true end end
+  if changed then storage:set(B.POWERDI,{sessions=left})end
+ end
+ local forgot=storage:get(B.DELETED);if type(forgot)=="table"and next(forgot)then storage:set(B.DELETED,{})end
+ if not storage:delete_backups()then if changed then storage:set(B.POWERDI,known)end;if type(forgot)=="table"and next(forgot)then storage:set(B.DELETED,forgot)end;return nil,"Saving failed, so the backups were not deleted."end
  return true
 end
 return B

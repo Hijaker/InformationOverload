@@ -9,23 +9,32 @@ local Team=mod:io_dofile(base.."team_damage")
 local Averages=mod:io_dofile(base.."history_averages")
 local Times=mod:io_dofile(base.."mission_times")
 local Patch=mod:io_dofile(base.."game_patch")
+local P=mod:io_dofile(base.."io_data_people")
 local C,DASH,fmt,one=D.c,Overview.dash,Data.fmt,Data.one
 local SEED={scab="Scabs",dreg="Dregs",mixed="Mixed"}
 local SEED_GREY=D.rgba(160,160,160)
+-- a partial match's row is drawn at this strength; an imported one carries a steel blue download symbol first in its row, left of the date
+local QUIET,STEEL=.55,D.rgba(134,160,182)
+-- a one-word tip in a small box
+local function small_tip(view,lines)local s=lines[1];local w,h=math.ceil(view:_w(s,14)*1.1)+16,24;local cv=D.canvas()
+ cv:text(s,8,0,w+200,h,14,C.gold);cv.z=0;cv:rect(0,0,w,h,C.tip);cv.z=1;cv:edges(0,0,w,h,1,C.hover)
+ local under,over=cv:widgets("io_tip",100);return {under=under,over=over,w=w,h=h}
+end
+local TIP_IMPORTED,TIP_PARTIAL,TIP_ESTIMATED={"Imported",build=small_tip},{"Partial",build=small_tip},{"Estimated",build=small_tip}
 local PAGE,RH=100,26
 local ARMOUR={unarmored="Unarmoured",disgustingly_resilient="Infested",berserker="Maniac",resistant="Unyielding",armored="Flak",super_armor="Carapace",unknown="Unknown"}
-local COLS={date=108,id=246,map=304,diff=568,result=674,class=841,kills=1033,dmg=1147,time=D.right-20}
--- Right-aligned toolbar slots, derived from the content edge and shared widths.
-local FILTER_X=D.left+D.width-280
-local CLASS_X=FILTER_X-10-280
-local MEASURE_X=CLASS_X-10-260
+local COLS={date=120,id=246,map=304,diff=568,result=674,class=841,kills=1033,dmg=1147,time=D.right-20}
+-- the top row's right end holds Filters, with Sort or the Summary's Statistic beside it; the second row's right end holds Delete or Your Class
+local FILTER_X=D.right-280
+local SORT_X=FILTER_X-10-200
+local CLASS_X=D.right-280
 local function pct0(n,d)if not d or d<=0 then return DASH end;return (string.format("%.1f",100*n/d):gsub("%.0$","")).."%"end
 local function card_h(n)return 52+n*26 end
 local function state(view)
  local st=view.io_hist;if not st then st={sort="new",measure="average",f=Data.blank_filters(),page=1,fp={}};view.io_hist=st end
  st.measure=st.measure or "average"
  local s=view.scope or {};local key=tostring(s.mode)..":"..tostring(s.diff)..":"..tostring(s.patch)
- if st.key~=key then st.key=key;st.page=1;st.fp={}end
+ if st.key~=key then st.key=key;st.page=1;if view.scroll then view.scroll[view.page]=0 end;st.fp={}end
  return st
 end
 -- on a scope change, drop picks the new scope's panel has no row for, so no filter stays on out of sight
@@ -41,7 +50,7 @@ local function prune(st,rows,mode,patch_label)
 end
 -- the filter panel: four lists over two rows, each list paged when it runs long
 local function filters(view,popup,st,opts,matched,mode)
- local x0,y0,W=D.left,D.row2+38,D.width;local cw=W/4;local f=st.f
+ local x0,y0,W=D.left,D.top+38,D.width;local cw=W/4;local f=st.f
  local top={{"Result","res",opts.res,"one"},{"Date","date",opts.date,"one"},{"Your Class","cls",opts.cls,"one"},{"Team Had","team",opts.team,"all"}}
  local bottom={{"Played With (All Of)","players",opts.players,"all"}}
  if mode=="havoc"then bottom[#bottom+1]={"Modifiers (All Of)","mods",opts.mods or {},"all"}end
@@ -71,7 +80,7 @@ local function filters(view,popup,st,opts,matched,mode)
      popup:text(o.label,ix+22,ry,cw-(ix-cx)-80,RH,16,how=="one"and on and C.gold_hi or C.value)
      popup:text(tostring(o.n or ""),cx+cw-72,ry,60,RH,14,C.muted,"right")
      view:_hit("popup",cx+1,ry,cw-2,RH,function()
-      if how=="one"then f[key]=o.v elseif f[key][o.v]then f[key][o.v]=nil else f[key][o.v]=true end;st.page=1
+      if how=="one"then f[key]=o.v elseif f[key][o.v]then f[key][o.v]=nil else f[key][o.v]=true end;st.page=1;if view.scroll then view.scroll[view.page]=0 end
      end,{bg=C.fill_h})
     end
    end
@@ -80,34 +89,75 @@ local function filters(view,popup,st,opts,matched,mode)
  block(top,y0,nt);block(bottom,y0+th,nb)
  local fy=y0+th+bh
  popup:text(matched..(matched==1 and " Run Matches"or " Runs Match"),x0+12,fy+8,400,34,14,C.muted)
- view:_ctl(popup,"popup",x0+W-226,fy+8,120,34,function()st.f=Data.blank_filters();st.fp={};st.page=1 end);popup:text("Clear All",x0+W-226,fy+8,120,34,16,C.value,"center")
+ view:_ctl(popup,"popup",x0+W-226,fy+8,120,34,function()st.f=Data.blank_filters();st.fp={};st.page=1;if view.scroll then view.scroll[view.page]=0 end end);popup:text("Clear All",x0+W-226,fy+8,120,34,16,C.value,"center")
  view:_ctl(popup,"popup",x0+W-96,fy+8,84,34,function()view.dd=nil end,{sel=true});popup:text("Done",x0+W-96,fy+8,84,34,16,C.gold_hi,"center")
 end
-local function tag(cv,x,y,win,w)
+local function tag(cv,x,y,win,w,k)
  local s=win and "Victory"or "Defeat";local c=win and C.gold or C.bad
- cv:edges(x,y+7,w,19,1,c,true);cv:text(s,x,y+7,w,19,14,c,"center");return w
+ cv:edges(x,y+7,w,19,1,c,true,k);cv:text(s,x,y+7,w,19,14,c,"center",nil,k);return w
+end
+-- an arrow down into an open tray, ten wide and eleven high, its top left at x,y
+local function download(cv,x,y,k)
+ cv:rect(x+4,y,2,7,STEEL,true,k)
+ for i=0,2 do cv:rect(x+1+i,y+3+i,2,2,STEEL,true,k);cv:rect(x+7-i,y+3+i,2,2,STEEL,true,k)end
+ cv:rect(x,y+7,2,4,STEEL,true,k);cv:rect(x+8,y+7,2,4,STEEL,true,k);cv:rect(x+2,y+9,6,2,STEEL,true,k)
+end
+-- Delete's tick box, filled red once ticked
+local TICKED=D.rgba(205,120,96,.14)
+local function tick(cv,x,y,on)
+ if on then cv:rect(x,y,16,16,C.bad,true);for i=0,3 do cv:rect(x+3+i,y+7+i,2,2,C.pop,true)end;for i=0,5 do cv:rect(x+7+i,y+9-i,2,2,C.pop,true)end
+ else cv:edges(x,y,16,16,1,C.hover)end
 end
 -- the Filters button and its panel, shared by Runs and Averages
 local function filter_button(view,cv,popup,st,rows,mode,matched)
  local nf=Data.filter_count(st.f,mode);local open=view.dd=="io_hist_filters"
- view:_ctl(cv,"base",FILTER_X,D.row2,280,34,function()view.dd=not open and "io_hist_filters"or nil end,{open=open,sel=nf>0 and not open})
- cv:text("Filters"..(nf>0 and " ("..nf..")"or ""),FILTER_X+12,D.row2,220,34,16,nf>0 and C.gold_hi or C.value);cv:chevron(FILTER_X+256,D.row2+13,"down",10,C.value)
+ view:_ctl(cv,"base",FILTER_X,D.top,280,34,function()view.dd=not open and "io_hist_filters"or nil end,{open=open,sel=nf>0 and not open})
+ cv:text("Filters"..(nf>0 and " ("..nf..")"or ""),FILTER_X+12,D.top,220,34,16,nf>0 and C.gold_hi or C.value);cv:chevron(FILTER_X+256,D.top+13,"down",10,C.value)
  if open then filters(view,popup,st,Data.options(rows,mode,view.scope.patch and Patch.display(view.scope.patch)or DASH,st.f,true),matched,mode)end
 end
 local function no_match(view,cv,st)
  view:_card(cv,D.left,D.sheet,D.width,110,"No Runs Match These Filters")
- view:_ctl(cv,"base",136,210,200,34,function()st.f=Data.blank_filters();st.page=1 end);cv:text("Clear Filters",136,210,200,34,16,C.value,"center")
+ view:_ctl(cv,"base",136,210,200,34,function()st.f=Data.blank_filters();st.page=1;if view.scroll then view.scroll[view.page]=0 end end);cv:text("Clear Filters",136,210,200,34,16,C.value,"center")
 end
 local function runs(view,cv,popup,st,rows,mode)
  local f=st.f
  local sorts={};local shown="Newest";for _,s in ipairs(Data.sorts)do sorts[#sorts+1]={value=s[1],label=s[2],current=st.sort};if s[1]==st.sort then shown=s[2]end end
- Data.dropdown(view,cv,popup,"io_hist_sort",800,D.row2,200,"Sort:",shown,sorts,function(v)st.sort=v;st.page=1 end)
+ Data.dropdown(view,cv,popup,"io_hist_sort",SORT_X,D.top,200,"Sort:",shown,sorts,function(v)st.sort=v;st.page=1;if view.scroll then view.scroll[view.page]=0 end end)
  local list=Data.apply(rows,f,mode,st.sort)
  filter_button(view,cv,popup,st,rows,mode,#list)
+ -- Delete brings up a tick box on every row; the ticked ones the filters still show are the ones deleted. A plain value on the view, so Back leaves it
+ if view.io_hist_deleting then view.io_hist_del=view.io_hist_del or {}else view.io_hist_del=nil end
+ local del=view.io_hist_del
+ if del then
+  local doomed={};for _,r in ipairs(list)do if del[r.id]then doomed[#doomed+1]=r.id end end
+  P.button(view,cv,D.right-110,D.row2,110,34,"Cancel",function()view.io_hist_deleting=nil end)
+  local n=#doomed;local lab=n>0 and "Delete "..n or "Select";local bw=math.max(150,view:_w(lab,16)+32)
+  P.button(view,cv,D.right-120-bw,D.row2,bw,34,lab,function()
+   local event=Managers.event;if not event or not mod.io_delete_matches then return end
+   local one=n==1
+   event:trigger("event_show_ui_popup",{title_text_unlocalized=one and "Delete Match"or "Delete "..n.." Matches",
+    description_text_unlocalized=(one and "Delete this match"or "Delete these "..n.." matches").." and rebuild records and streaks from the remaining Match History?\n\nA backup is made first, which Restore Latest Backup uses to bring "..(one and "it"or "them").." back.",options={
+    {text=one and "Delete Match"or "Delete "..n.." Matches",no_localization=true,close_on_pressed=true,callback=function()
+     local ok,reason=mod.io_delete_matches(doomed)
+     if not ok then mod:echo("%s",reason or "The matches could not be deleted.");return end
+     -- nothing behind or ahead may lead back to a deleted mission
+     local gone={};for _,id in ipairs(doomed)do gone[id]=true end
+     local keep,rb={},{};for i,p in ipairs(view.stack or {})do local r=view.io_run_back and view.io_run_back[i];if not (p=="run"and gone[r])then keep[#keep+1]=p;rb[#keep]=r end end;view.stack,view.io_run_back=keep,rb
+     -- and with those gone, two of one page in a row, or the page this is, would make a Back that does nothing
+     local k2,r2={},{};for i,p in ipairs(keep)do if not (p~="run"and p==k2[#k2])then k2[#k2+1]=p;r2[#k2]=rb[i]end end
+     while #k2>0 and k2[#k2]==view.page and k2[#k2]~="run"do r2[#k2]=nil;k2[#k2]=nil end;view.stack,view.io_run_back=k2,r2
+     for _,l in ipairs({view.io_steps or {},view.io_fwd or {}})do for i=#l,1,-1 do if l[i].page=="run"and gone[l[i].v["@run"]]then table.remove(l,i)end end end
+     view.io_hist_deleting=nil;view.io_hist_del=nil;view:_refresh()end},
+    {text="Cancel",no_localization=true,close_on_pressed=true,hotkey="back"}}})
+  end,{dis=n==0,danger=n>0})
+ else
+  P.button(view,cv,D.right-130,D.row2,130,34,"Delete",function()view.io_hist_deleting=true;view.io_hist_del={}end,{dis=#list==0,danger=#list>0})
+ end
  view:_sheet(cv,D.sheet)
  if #list==0 then no_match(view,cv,st);return view:_sheet_end(cv)end
- local pages=math.ceil(#list/PAGE);st.page=math.max(1,math.min(st.page or 1,pages));local first=(st.page-1)*PAGE
- local mk,md=0,0;for i=first+1,math.min(first+PAGE,#list)do local r=list[i];mk=math.max(mk,r.kills or 0);md=math.max(md,r.dmg or 0)end
+ -- the list scrolls on: it draws PAGE rows at a time and draws more as the bottom of what it drew comes into view; st.page counts how many lots
+ local pages=math.ceil(#list/PAGE);st.page=math.max(1,math.min(st.page or 1,pages));local first,last=0,math.min(st.page*PAGE,#list)
+ local mk,md=0,0;for _,r in ipairs(list)do mk=math.max(mk,r.kills or 0);md=math.max(md,r.dmg or 0)end
  -- one width for both tags, so the column of tags lines up
  local rw=math.max(view:_w("Victory",14),view:_w("Defeat",14))+14
  local y=D.sheet;local sorted={date=st.sort=="new"or st.sort=="old",kills=st.sort=="kills",dmg=st.sort=="dmg",time=st.sort=="fast"}
@@ -116,38 +166,55 @@ local function runs(view,cv,popup,st,rows,mode)
   local w=view:_w(label,14);local x=right and COLS[key]-w or COLS[key];local on=sorted[key]
   cv:text(label,x,y,w+6,30,14,on and C.value or C.muted)
   if on then local ax=right and x-13 or x+w+6;for i=0,3 do local yy=st.sort=="old"and y+12+i or y+15-i;cv:rect(ax+3-i,yy,1+2*i,1,C.value,true)end end
-  if sort then view:_hit("base",x-16,y,w+30,30,function()if key=="date"then st.sort=st.sort=="new"and "old"or "new"else st.sort=sort end;st.page=1 end,{under=C.value})end
+  -- in Delete mode the tick box owns the strip left of Date
+  local hx=key=="date"and del and D.left+16 or x-16
+  if sort then view:_hit("base",hx,y,w+14+(x-hx),30,function()if key=="date"then st.sort=st.sort=="new"and "old"or "new"else st.sort=sort end;st.page=1;if view.scroll then view.scroll[view.page]=0 end end,{under=C.value})end
  end
  cv:rect(D.left,y+29,D.width,1,C.frame,true)
- for i=first+1,math.min(first+PAGE,#list)do local r=list[i];local ry=y+30+(i-first-1)*32
-  view:_hit("base",D.left,ry,D.width,32,function()view.io_params=view.io_params or {};view.io_params.run=r.id;view.io_tab="overview";if view.scroll then view.scroll.run=0 end;view:_go("run")end,{bg=C.row_h})
-  local dw=view:_w(r.date,16);cv:text(r.date,COLS.date,ry,dw+4,32,16,C.label);cv:text(r.clock,COLS.date+dw+6,ry,60,32,14,C.muted)
+ if del then local all=#list>0;for _,r in ipairs(list)do if not del[r.id]then all=false;break end end
+  tick(cv,D.left+2,y+7,all);view:_hit("base",D.left-4,y,20,30,function()for _,r in ipairs(list)do del[r.id]=not all or nil end end,{under=C.value})end
+ for i=first+1,last do local r=list[i];local ry=y+30+(i-first-1)*32
+  -- a row the list's edge cuts through draws only its line: its words can't be cut, and its frames and symbol would show alone
+  local sc=cv.sc;if not sc or (ry+sc.dy+32*.2>=sc.y0 and ry+sc.dy+32*.8<=sc.y1)then
+  local k=r.partial and QUIET or nil
+  -- hovering the download symbol says Imported, a partial match's tag says Partial, and an estimated time says Estimated
+  local function tip(px,py)
+   if r.imported and not del and px>=D.left and px<COLS.date-2 and py>=ry+6 and py<ry+26 then return TIP_IMPORTED end
+   if r.partial and px>=COLS.result and px<COLS.result+rw and py>=ry+7 and py<ry+26 then return TIP_PARTIAL end
+   if r.est and px>=COLS.time-90 and px<COLS.time+4 and py>=ry+6 and py<ry+26 then return TIP_ESTIMATED end
+  end
+  -- while deleting, a click ticks the row instead of opening it, and its box takes the download symbol's place
+  local open=function()view.io_params=view.io_params or {};view.io_params.run=r.id;view.io_tab="overview";if view.scroll then view.scroll.run=0 end;view:_go("run")end
+  if del then local on=del[r.id];if on then cv:rect(D.left,ry,D.width,31,TICKED,true)end
+   local h=view:_hit("base",D.left,ry,D.width,32,function()del[r.id]=not del[r.id]or nil end,{bg=C.row_h},nil,(r.partial or r.est)and tip or nil);tick(cv,D.left+2,ry+8,on)
+   -- held and dragged, the press ticks or clears every row the pointer passes over
+   if h then h.state=on==true;h.paint=function(v)del[r.id]=v or nil end end
+  else view:_hit("base",D.left,ry,D.width,32,open,{bg=C.row_h},nil,(r.imported or r.partial or r.est)and tip or nil)end
+  local dw=view:_w(r.date,16);cv:text(r.date,COLS.date,ry,dw+4,32,16,C.label,nil,nil,k);cv:text(r.clock,COLS.date+dw+6,ry,60,32,14,C.muted,nil,nil,k)
+  if r.imported and not del then download(cv,D.left+4,ry+10,k)end
   -- the match's own number, the one its page shows, so it can be found again
-  cv:text("#"..tostring(r.id or DASH),COLS.id,ry,COLS.map-COLS.id-6,32,14,C.muted,"left",D.font.medium)
+  cv:text("#"..tostring(r.id or DASH),COLS.id,ry,COLS.map-COLS.id-6,32,14,C.muted,"left",D.font.medium,k)
   local seed=mode=="havoc"and SEED[r.faction]
   local map_width=COLS.diff-COLS.map-12
   local seed_width=seed and view:_w(seed,10)or 0
   local name=view:_fit(r.map,16,map_width-(seed and seed_width+8 or 0))
-  cv:text(name,COLS.map,ry,map_width-seed_width,32,16,C.value)
-  if seed then cv:text(seed,COLS.map+map_width-seed_width-2,ry,seed_width+2,32,10,SEED_GREY,"right")end
-  cv:text(view:_fit(r.diff,16,COLS.result-COLS.diff-6),COLS.diff,ry,COLS.result-COLS.diff-6,32,16,C.value)
-  local tw=tag(cv,COLS.result,ry,r.win,rw);if r.partial then cv:text("Partial",COLS.result+tw+6,ry,80,32,13,C.muted,"left",D.font.medium)end
-  cv:text(Overview.class_names[r.cls]or DASH,COLS.class,ry,150,32,16,C.value)
-  cv:text(r.kills and Overview.commas(r.kills)or DASH,COLS.kills-150,ry,150,32,16,r.kills and C.value or C.muted,"right")
-  cv:text(r.dmg and fmt(r.dmg)or DASH,COLS.dmg-150,ry,150,32,16,r.dmg and C.value or C.muted,"right")
-  cv:text(r.secs and Times.format(r.secs)or DASH,COLS.time-150,ry,150,32,16,r.secs and C.value or C.muted,"right")
-  if r.kills and mk>0 then local w=math.max(2,58*r.kills/mk);cv:rect(COLS.kills-w,ry+26,w,2,r.kills==mk and C.gold or C.hover,true)end
-  if r.dmg and md>0 then local w=math.max(2,88*r.dmg/md);cv:rect(COLS.dmg-w,ry+26,w,2,r.dmg==md and C.gold or C.hover,true)end
+  cv:text(name,COLS.map,ry,map_width-seed_width,32,16,C.value,nil,nil,k)
+  if seed then cv:text(seed,COLS.map+map_width-seed_width-2,ry,seed_width+2,32,10,SEED_GREY,"right",nil,k)end
+  cv:text(view:_fit(r.diff,16,COLS.result-COLS.diff-6),COLS.diff,ry,COLS.result-COLS.diff-6,32,16,C.value,nil,nil,k)
+  tag(cv,COLS.result,ry,r.win,rw,k)
+  cv:text(Overview.class_names[r.cls]or DASH,COLS.class,ry,150,32,16,C.value,nil,nil,k)
+  cv:text(r.kills and Overview.commas(r.kills)or DASH,COLS.kills-150,ry,150,32,16,r.kills and C.value or C.muted,"right",nil,k)
+  cv:text(r.dmg and fmt(r.dmg)or DASH,COLS.dmg-150,ry,150,32,16,r.dmg and C.value or C.muted,"right",nil,k)
+  -- a time estimated from Power DI's data reads with a leading ~
+  cv:text(r.est and Times.estimate_text(r.est)or r.secs and Times.format(r.secs)or DASH,COLS.time-150,ry,150,32,16,(r.secs or r.est)and C.value or C.muted,"right",nil,k)
+  if r.kills and mk>0 then local w=math.max(2,58*r.kills/mk);cv:rect(COLS.kills-w,ry+26,w,2,r.kills==mk and C.gold or C.hover,true,k)end
+  if r.dmg and md>0 then local w=math.max(2,88*r.dmg/md);cv:rect(COLS.dmg-w,ry+26,w,2,r.dmg==md and C.gold or C.hover,true,k)end
+  end
   cv:rect(D.left,ry+31,D.width,1,C.line,true)
  end
- y=y+30+(math.min(first+PAGE,#list)-first)*32+8
- if pages>1 then
-  for j,dir in ipairs({"left","right"})do local ok=dir=="left"and st.page>1 or dir=="right"and st.page<pages;local bx=j==1 and 100 or 330
-   view:_ctl(cv,"base",bx,y,34,34,function()st.page=st.page+(dir=="left"and -1 or 1);if view.scroll then view.scroll[view.page]=0 end end,{dis=not ok});cv:chevron(bx+13,y+13,dir,8,C.value,ok and 1 or .38)
-  end
-  cv:text("Page "..st.page.." Of "..pages,140,y,184,34,16,C.label,"center");y=y+44
- end
- cv:text(#list.." of "..#rows.." "..(Overview.mode_names[mode]or "").." runs. Kills and Damage are yours. Time is the clear time; defeats, and wins with no timing data, show —.",D.left,y,D.width,24,14,C.muted,"left",D.font.medium)
+ y=y+30+(last-first)*32+8
+ -- within fifteen rows of the end of what is drawn, the next lot is drawn on the next frame
+ local sc=cv.sc;if last<#list and (not sc or y-(sc.y1-sc.dy)<32*15)then st.page=st.page+1;view.io_dirty=true end
  view:_sheet_end(cv)
 end
 -- a run the overview cache has not counted yet is counted here, one a draw, and kept on the view; the sum is kept until the runs, the history or the cache change
@@ -186,11 +253,11 @@ local function averages(view,cv,popup,st,rows,mode)
  local label=selection=="highest"and "Max"or selection=="lowest"and "Min"or "Average"
  local metric_label=selection=="highest"and "Maximum"or selection=="lowest"and "Minimum"or "Average"
  local measures={{value="highest",label="Max",current=selection},{value="average",label="Average",current=selection},{value="lowest",label="Min",current=selection}}
- Data.dropdown(view,cv,popup,"io_hist_measure",MEASURE_X,D.row2,260,"Statistic:",label,measures,function(v)st.measure=v;st.page=1 end)
+ Data.dropdown(view,cv,popup,"io_hist_measure",SORT_X,D.top,200,"Statistic:",label,measures,function(v)st.measure=v;st.page=1;if view.scroll then view.scroll[view.page]=0 end end)
  local classes={};for _,c in ipairs(Data.class_order)do for _,r in ipairs(rows)do if r.cls==c then classes[#classes+1]=c;break end end end
  local cls=st.f.cls~="all"and st.f.cls or nil
  local opts={{value="all",label="Overall",current=cls or "all"}};for _,c in ipairs(classes)do opts[#opts+1]={value=c,label=Overview.class_names[c],current=cls or "all"}end
- Data.dropdown(view,cv,popup,"io_hist_cls",CLASS_X,D.row2,280,"Your Class:",cls and Overview.class_names[cls]or "Overall",opts,function(v)st.f.cls=v;st.page=1 end)
+ Data.dropdown(view,cv,popup,"io_hist_cls",CLASS_X,D.row2,280,"Your Class:",cls and Overview.class_names[cls]or "Overall",opts,function(v)st.f.cls=v;st.page=1;if view.scroll then view.scroll[view.page]=0 end end)
  local kept=Data.apply(rows,st.f,mode,"new");local nf=Data.filter_count(st.f,mode)
  filter_button(view,cv,popup,st,rows,mode,#kept)
  if #kept==0 and nf>0 then return no_match(view,cv,st)end
@@ -271,8 +338,10 @@ return function(view,cv,popup)
  -- the tab is a plain value on the view, so right click and forward step through it too
  local cur=view.io_hist_tab or "runs"
  local function tab(v)return function()if cur~=v then view.io_hist_tab=v~="runs"and v or nil;if view.scroll then view.scroll[view.page]=0 end end end end
- view.io_crumbs={{"Match History",cur~="runs"and tab("runs")or nil},{cur=="runs"and "Runs"or "All"}}
- local tx=100;for _,t in ipairs({{"runs","Runs"},{"avg","All"}})do local w=view:_w(t[2],16)+30;local sel=cur==t[1]
+ -- Delete mode is a step of its own, so Back leaves it before it leaves the page
+ view.io_crumbs=cur=="runs"and view.io_hist_deleting and {{"Match History",nil},{"Matches",function()view.io_hist_deleting=nil end},{"Delete Matches"}}
+  or {{"Match History",cur~="runs"and tab("runs")or nil},{cur=="runs"and "Matches"or "Summary"}}
+ local tx=100;for _,t in ipairs({{"runs","Matches"},{"avg","Summary"}})do local w=view:_w(t[2],16)+30;local sel=cur==t[1]
   view:_ctl(cv,"base",tx,D.row2,w,34,tab(t[1]),{sel=sel});cv:text(t[2],tx,D.row2,w,34,16,sel and C.gold_hi or C.value,"center");tx=tx+w+8 end
  -- the rows are kept until the runs or the scope change, or a mission's time is typed in, so the filter counts are not worked out again every draw
  local s=view.scope;local o=mod.io_display_options and mod.io_display_options()or {}

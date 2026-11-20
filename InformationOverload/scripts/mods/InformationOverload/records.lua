@@ -22,6 +22,11 @@ else
     Core=dofile("InformationOverload/scripts/mods/InformationOverload/records_core.lua")
 end
 local copy,deep_copy,checkpoint_copy,key,fresh_row=Core.copy,Core.deep_copy,Core.checkpoint_copy,Core.key,Core.fresh_row
+-- whether a match may hold a record or best: Imported Matches Count For Records decides for one imported from Power DI
+local Imported
+if mod and mod.io_dofile then Imported=part("InformationOverload/scripts/mods/InformationOverload/imported_records")
+else Imported=dofile("InformationOverload/scripts/mods/InformationOverload/imported_records.lua")end
+Records.ranked=Imported.ranked
 Records.rows_for,Records.best,Records.mission_row=Core.rows_for,Core.best,Core.mission_row
 
 -- Completed history rows are not modified by live collection. Snapshot their

@@ -157,8 +157,8 @@ function M.history(tracker,scope)
    local day=ts:match("^(%d%d%d%d%-%d%d%-%d%d)");local dn=day_number(day)
    local r={run=run,id=run.id,ts=ts,day=day,age=dn and math.floor(today-dn+.5)or nil,map=tracker:run_mission_name(c),mapid=c.mission_name or "?",zone=zone_of(c),
     faction=({renegade="scab",scabs="scab",cultist="dreg",dregs="dreg",mixed="mixed"})[c.havoc_faction],
-    diff=H.difficulty_short(c):gsub("Auric Maelstrom","Auric M."),win=run.victory==true,partial=run.full==false,cls=c.class,kills=type(run.kills)=="number"and run.kills or nil,
-    dmg=reported~=nil and own or nil,secs=clear_time(run),team={},mates={},mate_rows={},tracked_mates={},mods={},mod_plain={},mod_havoc={}}
+    diff=H.difficulty_short(c):gsub("Auric Maelstrom","Auric M."),win=run.victory==true,partial=run.full==false,imported=type(run.imported)=="table",cls=c.class,kills=type(run.kills)=="number"and run.kills or nil,
+    dmg=reported~=nil and own or nil,secs=clear_time(run),est=Times.estimate(run),team={},mates={},mate_rows={},tracked_mates={},mods={},mod_plain={},mod_havoc={}}
    local y,mo,d,hm=ts:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)[ T](%d%d:%d%d)");r.date=d and d.."/"..mo or DASH;r.clock=hm or ""
    for id,row in pairs(c.operative_roster or {})do if not row.personal and tostring(id)~=tostring(c.character)then
     if row.class then r.team[row.class]=true end
@@ -199,7 +199,7 @@ function M.keep(r,f,mode,skip)
  for _,k in ipairs(ORDER)do if k~=skip and not CHECK[k](r,f,mode)then return false end end
  return true
 end
-local SORT={new=function(r)return 0 end,old=function(r)return 0 end,dmg=function(r)return -(r.dmg or -1)end,kills=function(r)return -(r.kills or -1)end,fast=function(r)return r.secs or 1e9 end}
+local SORT={new=function(r)return 0 end,old=function(r)return 0 end,dmg=function(r)return -(r.dmg or -1)end,kills=function(r)return -(r.kills or -1)end,fast=function(r)return r.secs or r.est and 5e8+r.est or 1e9 end}
 M.sorts={{"new","Newest"},{"old","Oldest"},{"dmg","Highest Damage"},{"kills","Most Kills"},{"fast","Fastest"}}
 function M.apply(rows,f,mode,sort)
  local out={};for _,r in ipairs(rows)do if M.keep(r,f,mode)then out[#out+1]=r end end

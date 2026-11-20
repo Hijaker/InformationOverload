@@ -59,28 +59,30 @@ local function glow_widget(r)
  local _,over=cv:widgets("io_intro_glow",50);return over
 end
 -- each letter stands in its own place and cycles glyphs until it lands, the first quickly and later ones ever slower
+-- a line may take its own size, font, height and top from o.sizes, o.fonts, o.lhs and o.ys, and the I/O tag shows only where o.wx places it
 local function build(view,name,lines,o)
  local cv=D.canvas();local cells,total={},0
  for _,l in ipairs(lines)do total=total+#l end
  total=math.max(1,total);local ticks=math.min(60,math.max(10,math.floor(total/5)))
  if o.box then local b=o.box;cv.z=0;cv:rect(b[1],b[2],b[3],b[4],D.rgba(10,13,10,.95));cv.z=1;cv:edges(b[1],b[2],b[3],b[4],1,C.sel);cv:rect(b[1],b[2],3,b[4],C.gold)end
- cv:text("I/O",o.wx,o.wy,o.ww,o.wh,o.wsize,C.gold,o.align,F.title)
+ if o.wx then cv:text("I/O",o.wx,o.wy,o.ww,o.wh,o.wsize,C.gold,o.align,F.title)end
  local k=0
- for li,l in ipairs(lines)do local y=o.y+(li-1)*(o.lh+o.gap);local lw=view:_w(l,o.size,F.medium);local x0=o.align=="center"and o.x-lw/2 or o.x
+ for li,l in ipairs(lines)do local size,font,lh=o.sizes and o.sizes[li]or o.size,o.fonts and o.fonts[li]or F.medium,o.lhs and o.lhs[li]or o.lh
+  local y=o.ys and o.ys[li]or o.y+(li-1)*(o.lh+o.gap);local lw=view:_w(l,size,font);local x0=o.align=="center"and o.x-lw/2 or o.x
   for i=1,#l do local ch=l:sub(i,i)
-   if ch~=" "then local f=(k+i-1)/total;local cw=view:_w(ch,o.size,F.medium);local cx=x0+view:_w(l:sub(1,i),o.size,F.medium)-cw
-    cv:text(" ",cx-8,y,cw+16,o.lh,o.size,C.value,"center",F.medium);cells[#cells+1]={id="t"..cv.n,ch=ch,at=2+ticks*f*f+math.random()*2*(1-f)}
+   if ch~=" "then local f=(k+i-1)/total;local cw=view:_w(ch,size,font);local cx=x0+view:_w(l:sub(1,i),size,font)-cw
+    cv:text(" ",cx-8,y,cw+16,lh,size,C.value,"center",font);cells[#cells+1]={id="t"..cv.n,ch=ch,at=2+ticks*f*f+math.random()*2*(1-f),font=font~=F.medium and font or nil}
    end
   end
   k=k+#l
  end
- local under,over=cv:widgets(name,76)
+ local under,over=cv:widgets(name,o.z or 76)
  return {under=under,over=over,cells=cells,ticks=ticks,tk=0,next=0}
 end
 local function step(self,d,t)
  local st,ct=d.over.style,d.over.content;local tk=d.fast and d.ticks+4 or d.tk;local fin=tk>=d.ticks+4
  for _,x in ipairs(d.cells)do local s=st[x.id]
-  if tk>=x.at then ct[x.id]=x.ch;set(s.text_color,not fin and tk<x.at+2 and C.gold_hi or C.value);s.font_type=F.medium
+  if tk>=x.at then ct[x.id]=x.ch;set(s.text_color,not fin and tk<x.at+2 and C.gold_hi or C.value);s.font_type=x.font or F.medium
   else local g=math.random(#GLYPHS);ct[x.id]=GLYPHS:sub(g,g);set(s.text_color,math.random()<.5 and C.gold or C.muted);s.font_type=F.title end
  end
  -- the glow flickers while letters land, so the cog seems to speak
@@ -88,6 +90,8 @@ local function step(self,d,t)
  if fin then d.done=true;local fn=d.after;d.after=nil;if fn then fn()end;return end
  d.tk=tk+1;d.next=t+.04
 end
+-- shared with the popup I/O draws, whose words decode the same way
+I.build,I.step,I.GLYPHS=build,step,GLYPHS
 local function after(self,s,fn)self.q[#self.q+1]={self.now+s,fn}end
 function I.new()return setmetatable({phase="talk",mode="talk",angle=0,spin=0,want=0,lit=0,alpha=0,alpha_to=0,q={}},I)end
 function I:tick(view,t)

@@ -230,12 +230,12 @@ function K.speed(tracker,scope)
  else for _,list in pairs(built)do for map,run in pairs(list)do if not maps[map]or Times.faster(run,maps[map])then maps[map]=run end end end end
  local zones,list={},{}
  for key,run in pairs(maps)do local id,label=zone(run.context);local z=zones[id];if not z then z={label=label,maps={}};zones[id]=z;list[#list+1]=z end
-  z.maps[#z.maps+1]={key=key,run=run,name=tracker:run_mission_name(run.context),time=Times.format(run.completion_time.seconds)}end
+  z.maps[#z.maps+1]={key=key,run=run,name=tracker:run_mission_name(run.context),time=Times.estimate(run)and Times.estimate_text(run.completion_time.seconds)or Times.format(run.completion_time.seconds)}end
  table.sort(list,function(a,b)return a.label<b.label end);for _,z in ipairs(list)do table.sort(z.maps,function(a,b)return a.name<b.name end)end
  return list
 end
 function K.speed_rows(run)
- local c=run.context;local rows={{"Fastest Clear",Times.format(run.completion_time.seconds),big=true},{"Date",run.started_at and H.timestamp(run.started_at)or DASH}}
+ local c=run.context;local rows={{"Fastest Clear",Times.estimate(run)and Times.estimate_text(run.completion_time.seconds)or Times.format(run.completion_time.seconds),big=true},{"Date",run.started_at and H.timestamp(run.started_at)or DASH}}
  local mods={};for _,name in pairs(c.modifiers or {})do if type(name)=="string"and name~=""and not name:find("Fading",1,true)then mods[#mods+1]=name end end;table.sort(mods)
  if #mods>0 then rows[#rows+1]={"Modifiers",table.concat(mods,", ")}end
  if run.average_time then rows[#rows+1]={"Average Time",Times.format(run.average_time)}end

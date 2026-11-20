@@ -186,11 +186,14 @@ end
 function Records:record_class_overview(run)
  local c=run.context;if not c or c.training_history_test or c.difficulty=="psykhanium"or c.difficulty=="TEST ONLY"or run.data_only or type(run.victory)~="boolean"then return end
  local s=self:class_overview(c.patch,c.mode,c.class);s.games=s.games+1;if run.victory then s.wins=s.wins+1 end
- if not run.victory then s.failed_clutches_game=math.max(s.failed_clutches_game or 0,run.clutches and run.clutches.attempts or 0)end
- s.kills=math.max(s.kills,run.kills or 0);s.damage=math.max(s.damage,Records.run_damage_total(run))
- for kind,n in pairs(run.kill_categories or {})do s.categories[kind]=math.max(s.categories[kind]or 0,n)end
- if run.victory and run.clutches and run.clutches.seen then s.clutch_wins=s.clutch_wins+1;s.clutch_episodes=math.max(s.clutch_episodes,run.clutches.episodes or 0)
-  for _,kind in ipairs({"full","semi"})do local n=run.clutches[kind.."_episodes"]or 0;if n>0 then local wins=kind.."_clutch_wins";local episodes=kind.."_clutch_episodes";s[wins]=(s[wins]or 0)+1;s[episodes]=math.max(s[episodes]or 0,n)end end
+ -- an imported match counts in games and wins, and sets a best only while Imported Matches Count For Records is on
+ local ranked=not run.imported or Records.ranked~=nil and Records.ranked(run)
+ if ranked and not run.victory then s.failed_clutches_game=math.max(s.failed_clutches_game or 0,run.clutches and run.clutches.attempts or 0)end
+ if ranked then s.kills=math.max(s.kills,run.kills or 0);s.damage=math.max(s.damage,Records.run_damage_total(run))
+  for kind,n in pairs(run.kill_categories or {})do s.categories[kind]=math.max(s.categories[kind]or 0,n)end
+ end
+ if run.victory and run.clutches and run.clutches.seen then s.clutch_wins=s.clutch_wins+1;if ranked then s.clutch_episodes=math.max(s.clutch_episodes,run.clutches.episodes or 0)end
+  for _,kind in ipairs({"full","semi"})do local n=run.clutches[kind.."_episodes"]or 0;if n>0 then local wins=kind.."_clutch_wins";local episodes=kind.."_clutch_episodes";s[wins]=(s[wins]or 0)+1;if ranked then s[episodes]=math.max(s[episodes]or 0,n)end end end
  end
  self.dirty=true
 end
@@ -226,6 +229,8 @@ end
 function Records:cache_class_run(run)
     local c=run.context
     if c.training_history_test or c.difficulty=="psykhanium" or c.difficulty=="TEST ONLY" then return end
+    -- an imported match sets a personal record only while Imported Matches Count For Records is on
+    if run.imported and not (Records.ranked and Records.ranked(run)) then return end
     local row=self:rows_for(c)[1]
     local values={kills_mission=run.kills,total_damage_mission=Records.run_damage_total(run)}
     for name,value in pairs(values) do if value>(row.best[name] or -1) or value==row.best[name] and not (row.best_weapons and row.best_weapons[name]) then

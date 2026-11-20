@@ -51,7 +51,7 @@ return function(mod,collectors,api)
  local function load()
   if deps then return deps end
   local Overview=mod:io_dofile(base.."io_overview")
-  deps={Team=mod:io_dofile(base.."team_damage"),Times=mod:io_dofile(base.."mission_times"),clean=mod:io_dofile(base.."display_name").clean,class_names=Overview.class_names,runs=Overview.runs,
+  deps={Team=mod:io_dofile(base.."team_damage"),Times=mod:io_dofile(base.."mission_times"),Imported=mod:io_dofile(base.."imported_records"),clean=mod:io_dofile(base.."display_name").clean,class_names=Overview.class_names,runs=Overview.runs,
    title=function(tracker,c)return tracker:run_mission_name(c).." · "..Overview.diff_label(c)end,parts=function(tracker,c)return tracker:run_mission_name(c),Overview.diff_label(c)end,
    incident_counts=function(m)return api.dashboard_tracker().incident_counts(m)end}
   return deps
@@ -104,11 +104,11 @@ return function(mod,collectors,api)
  function pen:texture(m,x,y,w,h,c)if Renderer.draw_texture then Renderer.draw_texture(self.r,m,Vector3(x,y+self.oy,self.z+3),Vector2(w,h),c)end end
  -- a text's width in UI units, measured at the font size it is drawn at
  function pen:width(s,size,font)local ok,w,_,_,caret=pcall(Renderer.text_size,self.r,s,font or D.font.body,math.max(1,size*self.k));if ok and type(w)=="number"then return D.advance(w,caret)/self.k end;return #s*size*.5 end
- -- the game's Tab overlay on a HUD while it shows, and the difficulty icon its mission block holds
- local function overlay(hud)local e=type(hud)=="table"and hud.element and hud:element("HudElementTacticalOverlay");if e and (e._active or (e._alpha_multiplier or 0)>0)then return e end end
+ -- the game's Tab overlay on a HUD while it shows, then the overlay shown or not, whose mission block holds the difficulty icon
+ local function overlay(hud)local e=type(hud)=="table"and hud.element and hud:element("HudElementTacticalOverlay");if e and (e._active or (e._alpha_multiplier or 0)>0)then return e,e end;return nil,e or nil end
  local ICONS={}
  local function icons(e)
-  local d=(e._widgets_by_name or {}).danger_info
+  local d=e and (e._widgets_by_name or {}).danger_info
   ICONS.difficulty=d and d.visible~=false and d.content and d.content.difficulty_icon or nil
   return ICONS
  end
@@ -141,7 +141,8 @@ return function(mod,collectors,api)
  end
  -- esc says the Esc menu is up: its Tracker Panel is drawn at its own place, and the squad never shows over it
  -- fin, the end screen: the squad lines up with the game's currency boxes and the Tracker Panel rests above it, drawn or not, and with Scoreboard off above it as it comes out of the box, so no Scoreboard row moves the panel
- local function body(renderer,z,squad_too,tm_too,esc,layout,tab,fin,input)
+ -- the held Tracker Panel is one panel at one size, Tab overlay (tab) up or down, its difficulty icon read from the overlay (el) either way
+ local function body(renderer,z,squad_too,tm_too,esc,layout,tab,fin,input,el)
   local sb,seconds=SB.live();if not sb then return end
   local o,at=SB.options(),get;if fin and not board_on()then at=function()return nil end;o=S.options(at);layout=o.end_layout end
   layout=layout or o.layout;local k=renderer.scale or RESOLUTION_LOOKUP.scale or 1;local sw,sh=RESOLUTION_LOOKUP.width/k,RESOLUTION_LOOKUP.height/k
@@ -150,12 +151,11 @@ return function(mod,collectors,api)
   if not fin and not esc then pen.oy=bars(sw,sh);sh=sh-2*pen.oy;if pen.oy>0 then tm_too=false end end
   local extra=o.extra and S.EXTRA[layout]==true;local w,h=S.size("squad",layout,math.max(1,#sb.squad),nil,extra);local x,y,f
   if fin then x,y,f=S.end_place(at,sw,sh,w,h,layout,extra)end
-  if tm_too and tab then local tx,ty,tf,cats=S.tab_slot(sw,sh,get);W.tab(pen,tx,ty,sb.tm,seconds,tf,cats,icons(tab))
+  if tm_too and not esc and not fin then local tx,ty,tf,cats=S.tab_slot(sw,sh,get);W.tab(pen,tx,ty,sb.tm,seconds,tf,cats,icons(tab or el))
   elseif tm_too then local tw,th=S.size(esc and "tm_esc"or "tm");local tx,ty
    -- on the end screen as wide as the squad under it; beside the Esc menu matched to the menu, scaled to its height and widened on the Kills side
    if fin then tw=math.max(tw,w*f);tx,ty=S.end_tm_place(sw,x,y,w*f,tw,th);W.tm(pen,tx,ty,sb.tm,seconds,tw)
-   else tx,ty=S.place(esc and "tm_esc"or "tm",get,sw,sh,tw,th)
-    if esc then local k=th/312;W.tm(pen,tx,ty,sb.tm,seconds,tw/k,k)else W.tm(pen,tx,ty,sb.tm,seconds)end end end
+   else tx,ty=S.place("tm_esc",get,sw,sh,tw,th);local k=th/312;W.tm(pen,tx,ty,sb.tm,seconds,tw/k,k)end end
   if squad_too and #sb.squad>0 then
    if not fin then local b=tab and below(tab,sw,sh);if tab then seen={m=api.tracker().mission,sw=sw,sh=sh,b=b or nil}end;x,y,f=S.squad_place(get,sw,sh,w,h,b,extra)end
    -- the Strip, and with Extra Stats the Squad Table and Squad Cards, have a Combat and a Support page, flipped and hovered with the mouse
@@ -165,9 +165,9 @@ return function(mod,collectors,api)
    if paged then SB.input.drawn(ctx,x,y,dw,dh,input,k)end
   end
  end
- local function draw(renderer,z,squad_too,tm_too,esc,layout,tab,fin,input)
+ local function draw(renderer,z,squad_too,tm_too,esc,layout,tab,fin,input,el)
   if not ALIGN then local v=Gui.VerticalAlignCenter;ALIGN={left={horizontal_alignment=Gui.HorizontalAlignLeft,vertical_alignment=v},right={horizontal_alignment=Gui.HorizontalAlignRight,vertical_alignment=v},center={horizontal_alignment=Gui.HorizontalAlignCenter,vertical_alignment=v}}end
-  local ok,err=pcall(body,renderer,z,squad_too,tm_too,esc,layout,tab,fin,input)
+  local ok,err=pcall(body,renderer,z,squad_too,tm_too,esc,layout,tab,fin,input,el)
   if not ok then fail(err)end
  end
  -- the bests are worked out on the mission's first HUD frame, not the first time the key is held
@@ -208,7 +208,7 @@ return function(mod,collectors,api)
   Renderer.begin_pass(renderer,scenegraph,nil,0,settings)
   -- the game's UI goes no higher than layer 999, and anything drawn above it lands there with its box over its text, so the boxes
   -- sit just under and the text on 999, level with the cutscene bars and above their fade on 998
-  draw(renderer,995,squad,tm_too,false,nil,overlay(hud),nil,input)
+  local tab,el=overlay(hud);draw(renderer,995,squad,tm_too,false,nil,tab,nil,input,el)
   Renderer.end_pass(renderer)
  end
  -- beside the Esc menu, drawn inside the menu's own pass and only while it is the top view

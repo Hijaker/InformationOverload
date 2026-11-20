@@ -19,7 +19,7 @@ function X.model(tracker,run)
  local hit=made[run];if hit and hit.key==key then return hit.M end
  if not Used then Used={Debrief=dofile("endscreen_debrief"),S=dofile("scoreboard"),Team=dofile("team_damage"),Times=dofile("mission_times"),Overview=dofile("io_overview"),Model=dofile("endscreen_card_model"),clean=dofile("display_name").clean}end
  local Debrief,S,Team,Times,Overview,Model=Used.Debrief,Used.S,Used.Team,Used.Times,Used.Overview,Used.Model
- local t=Times.backend(run)or run.completion_time
+ local t=Times.completion(run)
  -- a mission-clock win timed on the basis Settings has, as the Overview's Clear Time is
  if run.victory and t and t.source=="mission_clock"then local marks=run.completion_markers or {};local chosen=basis=="boss"and Times.boss_death(run)or marks.victory_request or marks.victory_transition or marks.win_condition~=marks.boss_death and marks.win_condition
   if chosen then t={seconds=Times.marker(run,chosen),source="mission_clock"}else t=nil end end

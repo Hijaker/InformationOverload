@@ -3,6 +3,7 @@ local mod=get_mod("information_overload")
 local base="InformationOverload/scripts/mods/InformationOverload/"
 local Party;local function enemy_kills(p,counts)if not Party and mod and mod.io_dofile then Party=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/party_records")end;return Party and Party.kills(p,counts)or p.enemy_kills or {}end
 local Records=mod:io_dofile(base.."records")
+local Imported=mod:io_dofile(base.."imported_records")
 local Overview=mod:io_dofile(base.."io_overview")
 local Team=mod:io_dofile(base.."team_damage")
 local Times=mod:io_dofile(base.."mission_times")
@@ -27,6 +28,8 @@ local function best(list,get)local v,who;for _,r in ipairs(list)do local n=get(r
 -- what this run broke: a first or faster clear of its map on its patch, then each best it beat across its mode; a best beaten only within its class goes to the second list
 function B.broken(tracker,run,basis)
  local c=run.context or {};local out,cls={}, {};local history=tracker.data.run_history or {}
+ -- a match imported from Power DI breaks no record, and is no record to break, unless Imported Matches Count For Records is on
+ if not Imported.ranked(run)then return out,cls end
  local function clear(list)local maps=Times.build(list,c.mode,basis)[tostring(c.difficulty)];return maps and maps[c.mission_name]end
  local own=clear({run})
  if own then local before={};for _,r in ipairs(history)do if r.id~=run.id and r.context and r.context.patch==c.patch then before[#before+1]=r end end
@@ -39,11 +42,13 @@ function B.broken(tracker,run,basis)
   if not comparable and backend and old.completion_time.source~="backend"and type(mine)=="table"and mine.source=="mission_clock"and type(mine.seconds)=="number"then
    comparable,t,backend=true,mine.seconds,false
   end
-  if comparable and (not o or t<o)then out[1]={key="clear",label="Fastest Clear",v=t,time=true,backend=backend,prev=o,who=old,how=not o and "First Clear On This Patch"or nil}end
+  -- an imported match's estimate on either side shows marked as one
+  local est=t==own.completion_time.seconds and Times.estimate(own)~=nil or nil;local prev_est=old and Times.estimate(old)~=nil or nil
+  if comparable and (not o or t<o)then out[1]={key="clear",label="Fastest Clear",v=t,time=true,backend=backend,est=est,prev=o,prev_est=prev_est,who=old,how=not o and "First Clear On This Patch"or nil}end
  end
  if not Overview.accepted(run)then return out,cls end
  local same,mine={}, {}
- for _,r in ipairs(history)do local rc=r.context;if r.id~=run.id and rc and rc.mode==c.mode and Overview.accepted(r)then same[#same+1]=r;if rc.class==c.class then mine[#mine+1]=r end end end
+ for _,r in ipairs(history)do local rc=r.context;if r.id~=run.id and rc and rc.mode==c.mode and Overview.accepted(r)and Imported.ranked(r)then same[#same+1]=r;if rc.class==c.class then mine[#mine+1]=r end end end
  for _,s in ipairs(B.STATS)do local v=s[3](run)
   if type(v)=="number"and v>0 then local p,who=best(same,s[3])
    if p and v>p then out[#out+1]={key=s[1],label=s[2],v=v,prev=p,who=who,how=s[4]}
@@ -81,7 +86,7 @@ local function placed(src,ev)
 end
 function B.model(tracker,m,run,seconds,basis,list,cls)
  local src=run or m;local c=src.context or m.context or {};local history=tracker.data.run_history or {}
- local M={won=run and run.victory==true or not run and m.completion_time~=nil,date=stamp(src.started_at),map=tracker:run_mission_name(c),diff=Overview.diff_label(c),time=seconds and (Times.backend(src)and Times.format(seconds)or B.clock(seconds)),run_id=run and run.id}
+ local M={won=run and run.victory==true or not run and m.completion_time~=nil,date=stamp(src.started_at),map=tracker:run_mission_name(c),diff=Overview.diff_label(c),time=seconds and (Times.estimate(src)and Times.estimate_text(seconds)or Times.backend(src)and Times.format(seconds)or B.clock(seconds)),run_id=run and run.id}
  local name=clean(c.character_name)or "Your Operative";M.class=CN[c.class]or "Class";M.who=CN[c.class]and name..", "..M.class or name
  local L=c.operative_loadouts;local lo=L and (L[tostring(c.character)]or L[c.character_name])or {};M.weapons={}
  for _,k in ipairs({"melee","ranged"})do if type(lo[k])=="string"and lo[k]~=""then M.weapons[#M.weapons+1]=lo[k]end end
@@ -121,7 +126,7 @@ function B.model(tracker,m,run,seconds,basis,list,cls)
  local p=personal(src);local now={Records.run_useful(src),total,nil,p and (p.downs or 0),p and (p.deaths or 0),p and disabled(p)}
  M.avg={};local any=false
  for i,l in ipairs({"Damage","Kills","Mission Time","Downs","Deaths","Disabled"})do local v,s=now[i],sums[i]
-  if i==3 then if seconds then M.avg[#M.avg+1]={l=l,text=Times.backend(src)and Times.format(seconds)or B.clock(seconds)}end
+  if i==3 then if seconds then M.avg[#M.avg+1]={l=l,text=Times.estimate(src)and Times.estimate_text(seconds)or Times.backend(src)and Times.format(seconds)or B.clock(seconds)}end
   elseif type(v)=="number"then local r={l=l,text=commas(v)};M.avg[#M.avg+1]=r
    if s and s[2]>0 then any=true;local mean=s[1]/s[2];local d=v-mean;r.v,r.mean=v,mean;local rel=mean>0 and d/mean or (d>0 and 1 or d<0 and -1 or 0)
     local off=math.max(-.5,math.min(.5,rel*.5));if i>2 then off=-off end;r.n=s[2];r.off=off;r.good=off>=0

@@ -11,6 +11,11 @@ local S=mod:io_dofile(base.."scoreboard")
 local Screens=mod:io_dofile(base.."io_page_screens")
 local Backup=mod:io_dofile(base.."statistics_backup")
 local Icons=mod:io_dofile(base.."io_icons")
+local Popup=mod:io_dofile(base.."io_popup")
+local Imported=mod:io_dofile(base.."imported_records")
+-- the switch under Import From Power DI
+local IMPORTED_TITLE="Imported Matches Count For Records"
+local IMPORTED_HELP="Lets imported matches hold records and bests, their estimated times included."
 local C,F=D.c,D.font
 local X,W=D.left,D.width
 local RX=X+W-27
@@ -60,7 +65,7 @@ local function display(view,cv,popup_cv,y)
  h=h+row(view,cv,y+h,"Pages Keep Your Place","Moving to another page and back keeps where you were inside it. Off, a page always opens at its start. Clicking the page you are on takes you to its start either way.",nil,
   toggle(view,cv,keep,function()mod:set("keep_page_place",not keep,true)end))
  h=h+row(view,cv,y+h,"Mission Timer","The mission clock in the top left while you play.",nil,toggle(view,cv,o.mission_timer==true,function()set_opt("mission_timer",not o.mission_timer)end))
- return h+10,"Display"
+ return h,"Display"
 end
 -- a screen's own rows, drawn from what its module lists; a row's default stands until it is changed
 -- Minute By Minute's picture, 232 by 74 left of its switch: on, a bar a minute of damage over kills with a death marked at its time; off, the two lanes
@@ -99,7 +104,7 @@ local function screen_rows(view,cv,popup_cv,y,h,id,skip)
  return h
 end
 local NAME={};for _,s in ipairs(Screens.list)do NAME[s.id]=s.name end
-local function screen_tab(id)return function(view,cv,popup_cv,y)return screen_rows(view,cv,popup_cv,y,45,id)+10,NAME[id]end end
+local function screen_tab(id)return function(view,cv,popup_cv,y)return screen_rows(view,cv,popup_cv,y,45,id),NAME[id]end end
 local function endscreen(view,cv,popup_cv,y)
  local rating=mod:get("hide_mission_rating")~=false;local h=screen_rows(view,cv,popup_cv,y,45,"endscreen",{})
  h=h+row(view,cv,y+h,"Hide Mission Rating","Hides the thumbs up and down on the end screen that ask you to rate the mission.",nil,
@@ -111,7 +116,7 @@ local function endscreen(view,cv,popup_cv,y)
   h=h+row(view,cv,y+h,"Prolong End Screen",help,nil,function(ry,rh)
    P.slider(view,cv,"endscreen_keep_up_minutes",RX-220,ry+math.floor((rh-24)/2),220,m,K.min,K.max,m==0 and "Indefinite"or P.plural(m,"Minute"),function(v)mod:set("endscreen_keep_up_minutes",v,true)end)end)
  end
- return h+10,NAME.endscreen
+ return h,NAME.endscreen
 end
 local function buttons(view,cv,list)return function(y,h)local x=RX;for i=#list,1,-1 do local b=list[i];x=x-b[2];P.button(view,cv,x,y+math.floor((h-34)/2),b[2],34,b[1],b[3]);x=x-10 end end end
 local function pct(n)return string.format("%.0f%%",100*n)end
@@ -179,23 +184,23 @@ local function scoreboard(view,cv,popup_cv,y)
  h=h+row(view,cv,y+h,"Extra Stats","Adds boss damage, weakspots hit, critical hits and kills by kind to the Squad Table and Squad Cards.",nil,toggle(view,cv,o.extra,function()mod:set("scoreboard_extra",not o.extra,true)end))
  h=places(view,cv,y,h,o,{{"squad","Scoreboard Position","held"}})
  h=screen_rows(view,cv,popup_cv,y,h,"scoreboard",{scoreboard_layout=true,scoreboard_end_layout=true})
- return h+10,NAME.scoreboard
+ return h,NAME.scoreboard
 end
 local function tracker_tab(view,cv,popup_cv,y)
  local o=S.options(function(k)return mod:get(k)end);local h=45
  if not Screens.on("scoreboard")then h=h+key_row(view,cv,popup_cv,y+h,o)end
- h=h+row(view,cv,y+h,"Tracker Panel","Your mission time, kill streak, downs and kills beside the Esc menu.",nil,toggle(view,cv,o.esc,function()mod:set("scoreboard_esc",not o.esc,true)end))
+ h=h+row(view,cv,y+h,"On Esc","Your mission time, kill streak, downs and kills beside the Esc menu.",nil,toggle(view,cv,o.esc,function()mod:set("scoreboard_esc",not o.esc,true)end))
  h=h+row(view,cv,y+h,"Tracker Panel On Held","Adds the Esc menu's Tracker Panel to the scoreboard's keybind.",nil,toggle(view,cv,o.this_mission,function()mod:set("scoreboard_this_mission",not o.this_mission,true)end))
  h=h+row(view,cv,y+h,"While Dead","'Tracker Panel' while you wait to be rescued.",nil,toggle(view,cv,o.dead,function()mod:set("scoreboard_dead",not o.dead,true)end))
- h=h+row(view,cv,y+h,"On The End Screen","The Tracker Panel above the squad when the key is held on the End Screen.",nil,toggle(view,cv,o.end_tm,function()mod:set("scoreboard_end_tm",not o.end_tm,true)end))
+ h=h+row(view,cv,y+h,"On The End Screen","Adds the tracker panel above the squad when you hold its key, during the end screen.",nil,toggle(view,cv,o.end_tm,function()mod:set("scoreboard_end_tm",not o.end_tm,true)end))
  h=places(view,cv,y,h,o,{{"tm","Tracker Panel Position","held"},{"tm_esc","Tracker Panel Position In The Esc Menu","esc"}})
  do local sw,sh=view:_screen();local get=function(k)return mod:get(k)end;local _,_,f=S.tab_slot(sw,sh,get);local v=math.floor(100*f+.5);local K=S.TAB_SIZE
-  h=h+row(view,cv,y+h,"Tracker Panel Size On Overlay",P.wrap(view,"How big the Tracker Panel shows with the held overlay open.",14,620,F.medium),nil,function(ry,rh)
-   P.slider(view,cv,"scoreboard_tab_size",RX-220,ry+math.floor((rh-24)/2),220,math.max(K.min,math.min(K.max,v)),K.min,K.max,(S.tab_size(get)and "" or "Fits, ")..v.."%",function(n)mod:set("scoreboard_tab_size",n,true)end)
+  h=h+row(view,cv,y+h,"Tracker Panel Size",P.wrap(view,"How big the Tracker Panel shows.",14,620,F.medium),nil,function(ry,rh)
+   P.slider(view,cv,"scoreboard_tab_size",RX-220,ry+math.floor((rh-24)/2),220,math.max(K.min,math.min(K.max,v)),K.min,K.max,v.."%",function(n)mod:set("scoreboard_tab_size",n,true)end)
    P.button(view,cv,RX-480,ry+math.floor((rh-34)/2),90,34,"Reset",function()mod:set("scoreboard_tab_size",nil,true)end,{dis=not S.tab_size(get)})end)
  end
  h=screen_rows(view,cv,popup_cv,y,h,"tracker",{scoreboard_this_mission=true,scoreboard_esc=true,scoreboard_dead=true,scoreboard_end_tm=true})
- return h+10,NAME.tracker
+ return h,NAME.tracker
 end
 local function counting(view,cv,popup_cv,y)
  local o=opts();local policy=mod.io_history_policy and mod.io_history_policy()or {}
@@ -206,7 +211,7 @@ local function counting(view,cv,popup_cv,y)
  h=h+row(view,cv,y+h,"Boss Maps: Time To The Boss Death","On boss maps, the clear time stops when the final boss dies.",nil,toggle(view,cv,o.boss_map_timing==true,function()set_opt("boss_map_timing",not o.boss_map_timing)end))
  local tracked=mod:get("friend_stats_scope")~="off"
  h=h+row(view,cv,y+h,"Stats For Tracked Players","Keep stats for the players you track, as well as for your Steam friends.",nil,toggle(view,cv,tracked,function()mod:set("friend_stats_scope",tracked and "off"or "friends",true)end))
- return h+10,"Counting"
+ return h,"Counting"
 end
 local function tracked_players(view,cv,popup_cv,y,tracker)
  local h=45;local ft=tracker and tracker.data.friend_tracking or {};local tracked=ft.tracked or {};local aliases=ft.aliases or {}
@@ -233,7 +238,7 @@ local function tracked_players(view,cv,popup_cv,y,tracker)
   h=h+row(view,cv,y+h,r.name..(r.cls and " ("..(P.class_names[r.cls]or r.cls)..")"or ""),"Last Seen On "..tracker:run_mission_name(r.run.context)..", "..P.day(r.run.started_at),nil,
    friend and button(view,cv,110,"Friend",nil,{sel=true})or button(view,cv,110,on and "Tracked"or "Track",function()mod.io_friend_action(r.id,on and "untrack"or "track",r.name)end,{sel=on}))
  end
- return h+10,"Tracked Players"
+ return h,"Tracked Players"
 end
 -- the board and Let Teammates Start Your Assignment on until turned off, Auto-Claim Weekly Rewards off until turned on; the two under the board
 -- act only while it runs, so they are dimmed and shut while it is off
@@ -247,25 +252,69 @@ local function havoc_board(view,cv,popup_cv,y)
  for _,r in ipairs(UNDER_BOARD)do local v=mod:get(r[1]);local on=v==true or v==nil and r[4]
   h=h+row(view,cv,y+h,r[2],r[3],nil,toggle(view,cv,on,function()mod:set(r[1],not on,true)end,not live),nil,not live)
  end
- return h+10,NAME.havoc
+ return h,NAME.havoc
 end
 local function recording(view,cv,y)
  local blo=mod:get("capture_blo")~=false
  local h=45+row(view,cv,y+45,"Burst Limiter Override","Counts the Ogryn's Burst Limiter Override procs for its records.",nil,toggle(view,cv,blo,function()mod:set("capture_blo",not blo,true)end))
- return h+10
+ return h
+end
+-- a size in whole MB from 1 MB up, else in whole KB
+local function size(bytes)local mb=bytes/1048576;if mb>=1 then return string.format("%d MB",math.floor(mb+.5))end;return string.format("%d KB",math.floor(bytes/1024+.5))end
+-- Import From Power DI: its button reads Power DI's list of missions, then I/O's own popup asks; while it runs the row shows how far it has got
+local function powerdi_row(view,cv,y)
+ local st=mod.io_powerdi_status and mod.io_powerdi_status()
+ local desc={"Import & convert completed missions from Power DI into I/O.","Power DI files are left unchanged. Your current matches will not be overwritten."}
+ local start=function()local ok,why=mod.io_powerdi_request();if not ok and mod.io_notify then mod.io_notify(why)end end
+ if st and (st.stage=="run"or st.stage=="save")then view.redraw_at=(view.now or 0)+.25
+  local done,n=st.stage=="save"and st.n or st.i,math.max(1,st.n)
+  -- Abort until the final save begins; from then it shows greyed out, as the save must not be cut
+  local abort=not st.held and function()if mod.io_powerdi_abort then mod.io_powerdi_abort()end end or nil
+  return row(view,cv,y,"Import From Power DI",{"You will notice some stutter until it finishes."},nil,function(ry,rh)
+   -- the bar runs along the row's foot from under the title and stops short of Abort, the count sitting on its right end
+   local bx,by=X+36,ry+rh-10;local bw=RX-126-bx
+   cv:rect(bx,by,bw,6,C.fill);cv:rect(bx,by,math.floor(bw*math.min(1,done/n)+.5),6,C.gold,true)
+   cv:text(done.." of "..st.n,bx+bw-200,by-22,200,20,13,C.label,"right",F.medium)
+   -- the button centred at the row's right, past the bar's end
+   P.button(view,cv,RX-110,ry+math.floor((rh-34)/2),110,34,"Abort",abort,{dis=st.held})end)
+ end
+ if st and st.stage~="done"and st.stage~="said"then view.redraw_at=(view.now or 0)+.25;return row(view,cv,y,"Import From Power DI",desc,nil,button(view,cv,160,"Import…",nil,{dis=true}))end
+ if st and st.stage=="done"then desc={Backup.matches(st.imported).." imported."}
+  if st.pdi_bytes and st.io_bytes then desc[#desc+1]=size(st.pdi_bytes).." of saves converted into I/O's format at "..size(st.io_bytes).."."end
+  local list=mod.io_backups and mod.io_backups()or {};local latest=list[#list]
+  if latest and latest.powerdi and latest.powerdi[1]then desc[#desc+1]="Restore Latest Backup takes them back out."end;desc[#desc+1]="Importing again adds only Power DI missions that are new."
+ end
+ return row(view,cv,y,"Import From Power DI",desc,nil,button(view,cv,160,"Import…",start))
+end
+-- the popup's four lines, counted from Power DI's list
+local function powerdi_lines(n,m)
+ return {n==1 and "1 completed Power DI mission found."or n.." completed Power DI missions found.",m==1 and "1 incomplete mission cannot be imported."or m.." incomplete missions cannot be imported.","A backup will be made first.","If encountering any issues, use Restore Latest Backup."}
+end
+local function powerdi_popup(view)
+ local st=mod.io_powerdi_status and mod.io_powerdi_status()
+ if not st or view.io_modal then return end
+ -- nothing to import: the same popup, with what it found and one button
+ if st.stage=="said"then local dismiss=function()if mod.io_powerdi_dismiss then mod.io_powerdi_dismiss()end end
+  view.io_modal=Popup.new(view,{title="Import From Power DI",lines=st.lines,buttons={{"OK",dismiss}},cancel=dismiss});return
+ end
+ if st.stage~="confirm"then return end
+ view.io_modal=Popup.new(view,{title="Import From Power DI",lines=powerdi_lines(st.n,st.m),
+  buttons={{"Import",function()if mod.io_current()then mod.io_powerdi_confirm()end end},{"Cancel",function()mod.io_powerdi_cancel()end}},
+  cancel=function()if mod.io_powerdi_cancel then mod.io_powerdi_cancel()end end})
 end
 local function your_data(view,cv,y)
  local h=45;local echo=function(ok,reason)if ok then mod:echo("%s",reason or "Statistics rebuilt.")else mod:echo("%s",tostring(reason))end end
  local st=mod.io_storage
  if st and st.unavailable then h=h+row(view,cv,y+h,"Saving Is Off",{"Saved data could not be opened, so nothing will be saved until this is fixed.","Your files were left as they are.",tostring(st.error or ""):sub(1,120),hi=1})end
  if mod.io_request_reset then
-  h=h+row(view,cv,y+h,"Reset Statistics","Moves all saved statistics into a backup, after a confirmation. Settings are kept.",nil,button(view,cv,160,"Reset…",mod.io_request_reset))
+  h=h+row(view,cv,y+h,"Reset Statistics","Moves all saved statistics into a backup. Settings are kept.",nil,button(view,cv,160,"Reset…",mod.io_request_reset))
  end
  local backups=mod.io_backups and mod.io_backups()or {}
  if backups[1]and mod.io_request_restore then
-  h=h+row(view,cv,y+h,"Restore Latest Backup","Brings back "..Backup.describe(backups,false)..", after a confirmation. Matches played since are kept.",nil,button(view,cv,160,"Restore…",function()mod.io_request_restore(false)end))
-  if backups[2]then h=h+row(view,cv,y+h,"Restore All Backups","Brings back "..Backup.describe(backups,true)..", after a confirmation. Matches played since are kept.",nil,button(view,cv,160,"Restore All…",function()mod.io_request_restore(true)end))end
-  h=h+row(view,cv,y+h,"Delete Backups","Deletes "..(backups[2]and "all "..#backups.." backups"or "the backup").." for good, after a confirmation. Your current statistics are kept.",nil,button(view,cv,160,"Delete…",mod.io_request_delete_backups,{danger=true}))
+  local effect=function(all)return mod.io_restore_effect and mod.io_restore_effect(backups,all)or "Matches played since are kept."end
+  h=h+row(view,cv,y+h,"Restore Latest Backup","Brings back "..Backup.describe(backups,false)..". "..effect(false),nil,button(view,cv,160,"Restore…",function()mod.io_request_restore(false)end))
+  if backups[2]then h=h+row(view,cv,y+h,"Restore All Backups","Brings back "..Backup.describe(backups,true)..". "..effect(true),nil,button(view,cv,160,"Restore All…",function()mod.io_request_restore(true)end))end
+  h=h+row(view,cv,y+h,"Delete Backups","Deletes "..(backups[2]and "all "..#backups.." backups"or "the backup").." for good. Your current statistics are kept.",nil,button(view,cv,160,"Delete…",mod.io_request_delete_backups,{danger=true}))
  end
  local reconstruct=function(import)return function()
   if import and mod.io_start_history_import then
@@ -275,9 +324,12 @@ local function your_data(view,cv,y)
  end end
  h=h+row(view,cv,y+h,"Rebuild Statistics","Recount every record and streak from your saved Match History.",nil,button(view,cv,160,"Rebuild",function()
   popup("Rebuild Statistics","Rebuild statistics from your saved Match History?\nYour matches are not changed.","Rebuild",reconstruct(false))end))
- h=h+row(view,cv,y+h,"Import Match History",{"Copy match files into","InformationOverload\\reconstruction_import","Import replaces the matches on this PC.",hi=2},nil,button(view,cv,160,"Import…",function()
-  popup("Import Match History","Replace the active history with the files from reconstruction_import and rebuild statistics?\nThe matches it replaces go into a backup, which Restore Latest Backup brings back.","Import",reconstruct(true))end))
- return h+10
+ h=h+row(view,cv,y+h,"Import Match History",{"Copy I/O match files into","InformationOverload\\Import","Import adds them to the matches on this PC.",hi=2},nil,button(view,cv,160,"Import…",function()
+  popup("Import Match History","Add the matches from the Import folder that are not already on this PC, and rebuild statistics?\nA backup is made first, which Restore Latest Backup uses to take them back out.","Import",reconstruct(true))end))
+ if mod.io_powerdi_request then h=h+powerdi_row(view,cv,y+h)end
+ local counted=Imported.on()
+ h=h+row(view,cv,y+h,IMPORTED_TITLE,IMPORTED_HELP,nil,toggle(view,cv,counted,function()mod:set(Imported.KEY,not counted,true)end))
+ return h
 end
 return function(view,cv,popup_cv)
  local tracker=view:_tracker();local part=view.part or "screens"
@@ -293,6 +345,7 @@ return function(view,cv,popup_cv)
  else
   local rh=recording(ghost,D.canvas(),y);view:_card(cv,X,y,W,rh,"Recording");cv.z=5;recording(view,cv,y);y=y+rh+10
   local h=your_data(ghost,D.canvas(),y);view:_card(cv,X,y,W,h,"Your Data");cv.z=5;your_data(view,cv,y)
+  powerdi_popup(view)
  end
  view:_sheet_end(cv)
 end

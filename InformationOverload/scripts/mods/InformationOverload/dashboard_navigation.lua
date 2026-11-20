@@ -1,4 +1,5 @@
 local MissionRecords=get_mod("information_overload"):io_dofile("InformationOverload/scripts/mods/InformationOverload/records")
+local Imported=get_mod("information_overload"):io_dofile("InformationOverload/scripts/mods/InformationOverload/imported_records")
 local N={}
 function N.show_leave_abuse()
  local mod=type(get_mod)=="function"and get_mod("information_overload")
@@ -51,6 +52,8 @@ function N.has_weapon_data(tracker,patch,screen,weapon)
 end
 -- Most Damage In A Mission is useful damage, overkill left out, read from what a saved match keeps resident: summary navigation must never materialise a match's file-backed details.
 local function useful(run)return (MissionRecords.run_useful(run))end
+-- a match imported from Power DI counts in games and wins, and holds a record only while Imported Matches Count For Records is on
+local function ranked(run)return Imported.ranked(run)end
 function N.damage_share(tracker,id)
  for _,run in ipairs(tracker.data.run_history or {})do if run.id==id then
   local own,team=MissionRecords.run_useful(run)
@@ -62,17 +65,20 @@ function N.class_missions(tracker,patch,mode,class)
  local groups=tracker.data.class_overview;local saved=groups and groups[patch]and groups[patch][mode]and groups[patch][mode][class];if saved then
   -- the saved overview keeps reported damage, so the best comes from the matches alone
   local copy={};for key,value in pairs(saved)do copy[key]=value end;copy.damage=0
-  for _,run in ipairs(tracker.data.run_history or {})do local c=run.context or {};if c.patch==patch and c.mode==mode and c.class==class and not run.stats_excluded and not run.data_only then copy.damage=math.max(copy.damage,useful(run)or 0)end end
+  for _,run in ipairs(tracker.data.run_history or {})do local c=run.context or {};if c.patch==patch and c.mode==mode and c.class==class and not run.stats_excluded and not run.data_only and ranked(run)then copy.damage=math.max(copy.damage,useful(run)or 0)end end
   return copy
  end
  local result={games=0,wins=0,kills=0,damage=0,clutch_wins=0,clutch_episodes=0,categories={}}
  for _,run in ipairs(tracker.data.run_history or {})do local c=run.context
   if (not patch or c.patch==patch)and c.mode==mode and c.class==class and not c.training_history_test and c.difficulty~="psykhanium"and not run.stats_excluded and c.difficulty~="TEST ONLY"and not run.data_only and type(run.victory)=="boolean"then
    result.games=result.games+1;if run.victory then result.wins=result.wins+1 end
-   result.kills=math.max(result.kills,run.kills or 0)
-   result.damage=math.max(result.damage,useful(run)or 0)
-   for kind,n in pairs(run.kill_categories or {})do result.categories[kind]=math.max(result.categories[kind]or 0,n)end
-   if run.victory and run.clutches and run.clutches.seen then result.clutch_wins=result.clutch_wins+1;result.clutch_episodes=math.max(result.clutch_episodes,run.clutches.episodes or 0)end
+   if run.victory and run.clutches and run.clutches.seen then result.clutch_wins=result.clutch_wins+1 end
+   if ranked(run)then
+    result.kills=math.max(result.kills,run.kills or 0)
+    result.damage=math.max(result.damage,useful(run)or 0)
+    for kind,n in pairs(run.kill_categories or {})do result.categories[kind]=math.max(result.categories[kind]or 0,n)end
+    if run.victory and run.clutches and run.clutches.seen then result.clutch_episodes=math.max(result.clutch_episodes,run.clutches.episodes or 0)end
+   end
   end
  end
  return result
@@ -93,10 +99,10 @@ function N.mission_sources(tracker,patch,mode,stats,class)
   if c and not run.stats_excluded and not run.data_only and not c.training_history_test and c.difficulty~="psykhanium"and c.difficulty~="TEST ONLY"and (not patch or c.patch==patch)and c.mode==mode and (not class or c.class==class)and type(run.victory)=="boolean"then
    if run.victory then wins=wins+1 else wins=0 end
    if wins>best then best=wins;sources.win=run.id end
-   if run.kills==stats.kills and stats.kills>0 then sources.kills=run.id end
-   local d=useful(run)
+   if ranked(run)and run.kills==stats.kills and stats.kills>0 then sources.kills=run.id end
+   local d=ranked(run)and useful(run)
    if d==stats.damage and stats.damage>0 then sources.damage=run.id end
-   for id,n in pairs(run.kill_categories or {})do if n>0 and n==stats.categories[id]then sources[id]=run.id end end
+   for id,n in pairs(ranked(run)and run.kill_categories or {})do if n>0 and n==stats.categories[id]then sources[id]=run.id end end
   end
  end
  sources.win_value=best;return sources
@@ -109,7 +115,7 @@ function N.incident_outcome_summary(tracker,patch,mode,outcome)
   if type(value)=="number"and value>(result.best[id]or 0)then result.best[id]=value;result.sources[id]=source or {class=run.context.class};result.record_runs[id]=run.id end
  end
  for _,run in ipairs(tracker.data.run_history or {})do local c=run.context
-  if not run.stats_excluded and c and (not patch or c.patch==patch)and (not mode or c.mode==mode)and not c.training_history_test and c.difficulty~="psykhanium"and type(run.victory)=="boolean"and not run.data_only and (not outcome or run.victory==(outcome=="win"))then
+  if not run.stats_excluded and c and (not patch or c.patch==patch)and (not mode or c.mode==mode)and not c.training_history_test and c.difficulty~="psykhanium"and type(run.victory)=="boolean"and not run.data_only and ranked(run)and (not outcome or run.victory==(outcome=="win"))then
    local stats=tracker.incident_counts and tracker.incident_counts(run)or run.incidents or {}
    for _,field in ipairs({"downs","pounces","nets","mutant_charges","deaths","pickups","friendly_fire","lethal_kicks","murders","suicides"})do
     local own=field=="mutant_charges"and "mutant_charges_mission"or "personal_"..field.."_mission"

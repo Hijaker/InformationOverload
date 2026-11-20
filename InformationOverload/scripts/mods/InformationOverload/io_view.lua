@@ -43,8 +43,8 @@ function View:on_enter()
  mod.io_view_open=true
  -- a scoreboard tapped on goes off once the panel opens
  local sb=mod.io_scoreboard;if sb and sb.state then sb.state.on=nil end
- self.io_key_armed=nil;self.pinned=mod:get("rail_pinned")==true;self.rail_mode=nil;self.rows=nil;self.leaving=nil;self.swap_t0=nil;self.io_bar_drag=nil;self.io_slide=nil
- self.page="overview";self.stack={};self.io_steps=nil;self.io_psyk_deleting=nil;self.io_psyk_del=nil;self.io_run_back=nil;self.dd=nil;self.drawer=self.pinned;self.drawer_t0=nil;self.drawer_k=nil;self.scope=nil
+ self.io_key_armed=nil;self.pinned=mod:get("rail_pinned")==true;self.rail_mode=nil;self.rows=nil;self.leaving=nil;self.swap_t0=nil;self.io_bar_drag=nil;self.io_slide=nil;self.io_paint=nil
+ self.page="overview";self.stack={};self.io_steps=nil;self.io_psyk_deleting=nil;self.io_psyk_del=nil;self.io_hist_deleting=nil;self.io_hist_del=nil;self.io_run_back=nil;self.dd=nil;self.drawer=self.pinned;self.drawer_t0=nil;self.drawer_k=nil;self.scope=nil
  -- a mission opened from the End Screen sits on Match History, so Back and right click have somewhere to go
  if self.io_run then self.page="run";self.stack={"history"};self.io_params={run=self.io_run};self.io_tab="overview";self.io_run=nil end
  -- the first open plays the intro instead of the page, unless a tap in a mission opened it
@@ -52,7 +52,10 @@ function View:on_enter()
  self:_refresh()
 end
 function View:on_exit()
- self.layers={};self.hits={};self.model=nil;self.rows=nil;self.leaving=nil;self.intro=nil;self.io_flash=nil;self.io_tip=nil;self.io_doss=nil;self.io_bar_drag=nil;self.io_slide=nil;mod.io_view_open=nil
+ -- a popup I/O drew goes with the panel, as Cancel, and so does a Power DI import still waiting to ask
+ local modal=self.io_modal;if modal then pcall(modal.back,modal,self);self.io_modal=nil end
+ if mod.io_powerdi_leave then pcall(mod.io_powerdi_leave)end
+ self.layers={};self.hits={};self.model=nil;self.rows=nil;self.leaving=nil;self.intro=nil;self.io_flash=nil;self.io_tip=nil;self.io_doss=nil;self.io_bar_drag=nil;self.io_slide=nil;self.io_paint=nil;mod.io_view_open=nil
  if mod.io_storage and mod.io_storage.release_details then mod.io_storage:release_details()end
  if mod.io_release_talent_art then mod.io_release_talent_art()end
  if View.super.on_exit then View.super.on_exit(self)end
@@ -198,11 +201,11 @@ function View:_ctl(cv,g,x,y,w,h,fn,opt)
  if fn and not opt.dis then self:_hit(g,x,y,w,h,fn,opt.hv or (not opt.sel and {bg=C.fill_h,edge=C.hover})or nil,opt.rail,opt.tip)end
  return k
 end
--- tip is a list of lines shown while the pointer rests on the area
+-- tip is a list of lines shown while the pointer rests on the area, or a function of the pointer in page coordinates giving them
 -- key names an area the page draws differently while the pointer is on it; the page redraws when that changes
 function View:_hit(g,x,y,w,h,fn,hv,rail,tip,key)
  local sc=g=="base"and self.sheet;if sc then y=y+sc.dy;if y<sc.y0 then h=h-(sc.y0-y);y=sc.y0 end;if y+h>sc.y1 then h=sc.y1-y end;if h<=0 then return end end
- local hits=self.hits;hits[#hits+1]={g=g,x=x,y=y,w=w,h=h,fn=fn,hv=hv,rail=rail,tip=tip,key=key}
+ local hits=self.hits;local hit={g=g,x=x,y=y,w=w,h=h,fn=fn,hv=hv,rail=rail,tip=tip,key=key,dy=sc and sc.dy or 0};hits[#hits+1]=hit;return hit
 end
 -- a popup's panel, which takes a click anywhere on it so none falls through to what lies under it
 function View:_panel(popup,x,y,w,h)popup.z=1;popup:rect(x,y,w,h,C.pop);popup.z=2;popup:edges(x,y,w,h,1,C.hover);self:_hit("popup",x,y,w,h,function()return true end)end
@@ -246,6 +249,7 @@ end
 -- built once per set of lines and only moved after; a tip that fails to build stays hidden until the lines change
 function View:_tip_at(hit,x,y)
  local tip,lines=self.io_tip,hit and not self.dd and x and hit.tip
+ if type(lines)=="function"then lines=lines(x,y-(hit.dy or 0))end
  if type(lines)~="table"or #lines==0 then if tip then tip.on=false end;return end
  if not tip or tip.lines~=lines then local key=tip_key(lines)
   if not tip or tip.key~=key then local ok,made=pcall(lines.build or self._tip_build,self,lines)
@@ -423,7 +427,8 @@ function View:_render()
  end
  self:_drop(old)
 end
--- Move: the panel steps aside so one box, io_move, can be dragged: the squad or the Tracker Panel where they show with the key held, or "tm_esc", the Tracker Panel beside the Esc menu.
+-- Move: the panel steps aside so one box, io_move, can be dragged: the squad or the Tracker Panel where they show with the key held, the other
+-- of the two drawn faint where it sits to line them up by, or "tm_esc", the Tracker Panel beside the Esc menu.
 function View:_screen()
  local k=self._render_scale or RESOLUTION_LOOKUP.scale or 1;local sw,sh=RESOLUTION_LOOKUP.width/k,RESOLUTION_LOOKUP.height/k
  local node=self._ui_scenegraph and self._ui_scenegraph.panel;local o=node and node.world_position
@@ -447,9 +452,20 @@ function View:_render_move()
   local d=self.io_drag;local on=d and d.kind==kind and prev;local at=get
   if on and d.moved then local k,fx,fy=S.KEYS[kind],S.fraction(d.x,d.y,sw,sh,prev.w,prev.h);at=function(key)if key==k[1]then return fx end;if key==k[2]then return fy end;return get(key)end end
   local key=get("dashboard_key");local tab_key=key==nil or type(key)=="table"and key[1]=="tab"and key[2]==nil
-  local below=kind=="squad"and sb and sb.tab_below and sb.tab_below(sw,sh,function(_,s,size,font)return self:_w(s,size,font)end)
+  local below=not esc and sb and sb.tab_below and sb.tab_below(sw,sh,function(_,s,size,font)return self:_w(s,size,font)end)
   local list=S.move_boxes(kind,o,tab_key,layout,n,sw,sh,at,below);local b=list[1]
-  self.io_boxes[kind]=b;self.io_ghosts={}
+  self.io_boxes[kind]=b;self.io_ghosts={};self.io_other=nil
+  -- the other held panel, faint where it sits and never dragged, its name drawn only where the box being moved leaves it clear; left out when it never shows in a mission
+  local other=kind=="squad"and "tm"or "squad"
+  local shows=other=="squad"and Screens.on("scoreboard")and o.layout~="off"or other=="tm"and Screens.on("tracker")and (o.this_mission or o.dead)
+  if not esc and shows then local g=S.move_boxes(other,o,tab_key,layout,n,sw,sh,get,other=="squad"and below or nil)[1]
+   self.io_other={kind=other,box=g};local gx,gy=g.x-ox,g.y-oy
+   cv.z=.5;cv:rect(gx,gy,g.w,g.h,C.card);cv:edges(gx,gy,g.w,g.h,1,C.line)
+   local name=other=="squad"and label or "Tracker Panel"
+   local function free(ty,th)return not (g.x<b.x+b.w and b.x<g.x+g.w and ty<b.y+b.h and b.y<ty+th)end
+   local mid=g.y+g.h/2-15;local at_y=free(mid,30)and mid or free(g.y+4,30)and g.y+4 or free(g.y+g.h-34,30)and g.y+g.h-34
+   if at_y then cv:text(name,gx,at_y-oy,g.w,30,20,C.muted,"center",F.title)end
+  end
   local x,y,w,h=b.x-ox,b.y-oy,b.w,b.h;local c=on and C.gold or C.frame
   cv.z=1;cv:rect(x,y,w,h,C.panel);cv.z=2;cv:edges(x,y,w,h,2,c);cv:corners(x-1,y-1,w+2,h+2,on and C.gold or C.corner)
   local mid=y+h/2
@@ -576,7 +592,7 @@ function View:_overview(cv,popup)
   end
   self:_card(cv,x,y,D.width,166,"No Missions Recorded Yet")
   cv:text("Play a mission and it shows up here.",x+36,y+48,D.width-72,22,16,C.label)
-  cv:text("Moving from another PC? Copy your match files into the import folder and import them.",x+36,y+72,D.width-72,22,16,C.label)
+  cv:text("Moving from another PC? Copy your match files into the Import folder and import them.",x+36,y+72,D.width-72,22,16,C.label)
   self:_ctl(cv,"base",x+36,y+112,260,34,function()self:_open_settings();self.part="data"end)
   cv:text("Open Settings › Data",x+36,y+112,260,34,16,C.value,"center");return
  end
@@ -736,6 +752,18 @@ function View:update(dt,t,input)
  if self.page=="psyk"and t>=(self.io_bench_at or 0)and mod.io_is_training and mod.io_is_training()then self.io_bench_at=t+.5;self:_render()end
  if t>=(self.poll_at or 0)then self.poll_at=t+1;local rev=self:_revision();if self.rev and rev~=self.rev then self:_refresh()end;self.rev=rev end
  local x,y=self:_cursor(input)
+ -- a popup I/O drew takes every click and key until it closes; one that fails is closed as Cancel, never the panel, and logged, never in chat
+ local modal=self.io_modal
+ if modal then self.dd=nil;self.io_bar_drag=nil;self.io_slide=nil;self.io_paint=nil
+  local ok,err=pcall(function()modal:tick(self,t);modal:point(x,y)
+   if pressed(input,"left_pressed")then modal:click(self,x,y)
+   elseif pressed(input,"right_pressed")or pressed(input,"back")or side("extra_1")then modal:back(self)end
+  end)
+  if not ok then if mod.info then mod:info("I/O popup: %s",tostring(err))end;self.io_modal=nil;pcall(modal.back,modal,self)end
+  if self.io_modal~=modal then self:_render()end
+  self:_pointer(nil,nil,t)
+  return pass_input,pass_draw
+ end
  local taken=false
  if self.intro and pressed(input,"left_pressed")then local ok,r=pcall(self.intro.click,self.intro,self,x,y);if ok then taken=r==true else self:_intro_broken(r)end end
  if taken then
@@ -745,6 +773,8 @@ function View:update(dt,t,input)
   if self.dd and (not hit or hit.g~="popup")then self.dd=nil end
   -- the model is built again only when a click changed what it is built from; a fn that returns true changed nothing it holds
   local before=hit and hit.fn and self:_snap()
+  -- a press on a tick box starts a drag that sets every box the pointer passes over the way this press set its own
+  if hit and hit.paint then self.io_paint={v=not hit.state,y=y,page=self.page}end
   local k0=self:_inputs();local light=hit and hit.fn and hit.fn()
   if before then self:_came_from(before)end
   if self.view_name and Managers.ui:view_active(self.view_name)then if light or self:_inputs()==k0 then self:_render()else self:_refresh()end end
@@ -765,6 +795,14 @@ function View:update(dt,t,input)
   elseif y then if not held.grab then held.grab=y>=b.ty and y<b.ty+b.th and y-b.ty or b.th/2 end
    local room=b.h-b.th;local at=room>0 and math.max(0,math.min(b.max,math.floor((y-held.grab-b.y0)*b.max/room+.5)))or 0
    self.scroll=self.scroll or {};if at~=(self.scroll[self.page]or 0)then self.scroll[self.page]=at;self:_render()end
+  end
+ end
+ local pt=self.io_paint
+ if pt then if not down(input,"left_hold")or pt.page~=self.page then self.io_paint=nil
+  -- every row between the last frame's point and this one, so a quick drag skips none
+  elseif x then local y0=pt.y or y;local s=y>=y0 and 8 or -8;local any=false
+   local function at(yy)local h=self:_top(x,yy);if h and h.paint and h.state~=pt.v then h.paint(pt.v);h.state=pt.v;any=true end end
+   for yy=y0,y,s do at(yy)end;at(y);pt.y=y;if any then self:_render()end
   end
  end
  -- a held slider follows the pointer along its track until let go anywhere, or until it is no longer drawn; the press that took it sets it too
@@ -828,5 +866,6 @@ function View:_draw_widgets(dt,t,input_service,ui_renderer,render_settings)
   if not ok then tip.on=false;tip.broken=true;mod:error("I/O tip: %s",tostring(err))end
  end
  if self.intro then local ok,err=pcall(self.intro.draw,self.intro,self,ui_renderer);if not ok then self:_intro_broken(err)end end
+ local modal=self.io_modal;if modal then local ok,err=pcall(modal.draw,modal,self,ui_renderer);if not ok then if mod.info then mod:info("I/O popup: %s",tostring(err))end;self.io_modal=nil;pcall(modal.back,modal,self)end end
 end
 return View

@@ -51,10 +51,10 @@ function M.map(m,mates)
  if n>0 then o.last,o.since=runs[1].date,runs[n].date end
  local best,top,lo,hi
  for _,r in ipairs(timed(runs))do if not best or r.time<best.time then best=r end end
- if best then o.best_clear={B.clock(best.time),best.rank,best.date}end
+ if best then o.best_clear={B.time_text(best),best.rank,best.date}end
  local by,order={},{}
  for _,r in ipairs(runs)do local s=r.won and 1 or 2
-  if type(r.dmg)=="number"and r.dmg>0 and (not top or r.dmg>top.dmg)then top=r end
+  if type(r.dmg)=="number"and r.dmg>0 and (r.ranked or r.ranked==nil and not r.imported)and (not top or r.dmg>top.dmg)then top=r end
   local k=r.rank;if k then local a=o.at_rank[k];if not a then a={0,0};o.at_rank[k]=a end;a[s]=a[s]+1;if not lo or k<lo then lo=k end;if not hi or k>hi then hi=k end end
   local cl=r.cls or Overview.dash;local c=by[cl];if not c then c={cl,0,0,#order+1};by[cl]=c;order[#order+1]=c end;c[s+1]=c[s+1]+1
   if #o.strip<12 then o.strip[#o.strip+1]={r.rank,cl,r.won==true}end
@@ -181,7 +181,7 @@ function M.runs(h,key,basis)
  local m=list and B.map(h.h,key,basis)
  if m then got.base=m.base
   for i,r in ipairs(m.runs)do local run=list[i]
-   got.runs[i]={date=r.date,rank=tonumber(run.context.difficulty),cls=r.cls,won=r.won,time=r.time,backend=r.backend,dmg=r.dmg,tracked=r.tracked,events=r.events,keys=keys(run,h.h.tracker.data)}end end
+   got.runs[i]={date=r.date,rank=tonumber(run.context.difficulty),cls=r.cls,won=r.won,time=r.time,backend=r.backend,dmg=r.dmg,imported=r.imported,ranked=r.ranked,est=r.est,tracked=r.tracked,events=r.events,keys=keys(run,h.h.tracker.data)}end end
  h.runs[id]=got;return got
 end
 -- the board leaves out the Emperor's Fading Light, which the rank brings as the game's own generator adds it: I from 16, II from 30

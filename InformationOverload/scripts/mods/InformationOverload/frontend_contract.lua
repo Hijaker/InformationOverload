@@ -2,7 +2,7 @@
 -- version 2: a saved match's party records and combat timeline keep what its pages read (docs/IO-API.md)
 local F={version=2}
 local function copy(v)if type(v)~='table'then return v end;local mt=getmetatable(v);if mt and mt.io_materialize then v=mt.io_materialize(v)end;local o={};for k,x in pairs(v)do o[k]=copy(x)end;return o end
-local fields={'id','context','victory','full','run_kind','started_at','completion_time','completion_markers','timing_origin','segments','resumed','records','damage','team_damage','party_records','enemy_kill_counts','boss_kills','boss_operatives','incidents','friendly_fire_pairs','pickup_pairs','team_psykers','field_improvisation','hyper_critical','haymaker','class_events','clutches','operative_clutches','kill_categories','support','all_departures','departure_events','combat_timeline','measurements'}
+local fields={'id','context','victory','full','run_kind','started_at','imported','completion_time','completion_markers','timing_origin','segments','resumed','records','damage','team_damage','party_records','enemy_kill_counts','boss_kills','boss_operatives','incidents','friendly_fire_pairs','pickup_pairs','team_psykers','field_improvisation','hyper_critical','haymaker','class_events','clutches','operative_clutches','kill_categories','support','all_departures','departure_events','combat_timeline','measurements'}
 local function experimental(v)
  if not v then return end
  if v.segments then local out={segments={}};for _,s in ipairs(v.segments)do out.segments[#out.segments+1]=experimental(s)or {status='not_recorded'}end;return out end

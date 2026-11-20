@@ -13,12 +13,27 @@ function F.backend(run)
   if type(n)=="number"and n==n and n>0 and n<=86400 then return {seconds=n,source="backend",field=field}end
  end
 end
-function F.completion(run)return F.backend(run)or run.completion_time end
+-- a match imported from Power DI keeps an estimate, worked out from where its data stops: always shown marked as one, and ranked, compared
+-- and averaged as a clear time only while Imported Matches Count For Records is on
+F.ESTIMATE="power_di_estimate"
+local Imported
+function F.estimates_count()
+ if Imported==nil then local mod=type(get_mod)=="function"and get_mod("information_overload")or nil
+  Imported=mod and type(mod.io_dofile)=="function"and mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/imported_records")or false end
+ return Imported and Imported.on()or false
+end
+function F.estimate(run)
+ local t=run.victory==true and run.completion_time
+ if type(t)=="table"and t.source==F.ESTIMATE and type(t.seconds)=="number"and t.seconds>0 and t.seconds<=86400 then return t.seconds end
+end
+function F.estimate_text(n)local s=math.floor(n+.5);return string.format("~%d:%02d",math.floor(s/60),s%60)end
+function F.completion(run)local t=run.completion_time;if type(t)=="table"and t.source==F.ESTIMATE and not (F.estimate(run)and F.estimates_count())then t=nil end;return F.backend(run)or t end
 local function partial40(run)local c=run.context or {};return run.full==false and c.mode=="havoc"and tonumber(c.difficulty)==40 end
 -- a backend time counts only for a run the clock or a typed time could count for, and neither counts for one Counting leaves out
 function F.counts(run,t)
  if t.source=="backend"then return (run.full==true or partial40(run))and not run.stats_excluded end
  return run.full==true and t.source=="mission_clock"or t.source=="manual"and partial40(run)and not run.stats_excluded
+  or run.full==true and t.source==F.ESTIMATE and not run.stats_excluded and F.estimates_count()
 end
 -- of one map's clears, one the server timed ranks ahead of one the mission clock or a typed time gave, as their seconds cannot be compared
 function F.faster(a,b)

@@ -67,13 +67,16 @@ end
 local function shape(tracker,run)
  local c=run.context;local m={map=tracker:run_mission_name(c),faction=c.mode=="havoc"and Faction.label(c.havoc_faction)or nil}
  m.scope={{"Mode:",Overview.mode_names[c.mode]or DASH},{"Difficulty:",Overview.diff_label(c)},{"Patch:",c.patch and Patch.display(c.patch)or DASH}}
- local info={{"Date",run.started_at and H.timestamp(run.started_at)or DASH},{"Match","#"..tostring(run.id or DASH)},{"Result",(run.victory and "Victory"or "Defeat")..(run.full==false and ", Partial Mission"or "")},
+ local info={{"Date",run.started_at and H.timestamp(run.started_at)or DASH},{"Match","#"..tostring(run.id or DASH)},{"Result",(run.victory and "Victory"or "Defeat")..(run.full==false and ", Partial Mission"or "")..(type(run.imported)=="table"and ", Imported"or "")},
   {"Difficulty",Overview.diff_label(c)},{"Your Class",Overview.class_names[c.class]or DASH}}
  local mods={};for id,name in pairs(c.modifiers or {})do name=modifier(id,name);if type(name)=="string"and name~=""and not name:find("Fading",1,true)then mods[#mods+1]=name end end;table.sort(mods)
  if #mods>0 then info[#info+1]={"Modifiers",table.concat(mods,", ")}end
  local marks,opts=run.completion_markers or {},mod.io_display_options and mod.io_display_options()or {}
  local completion=Times.completion(run)
- if run.victory and completion and type(completion.seconds)=="number"then
+ if Times.estimate(run)then
+  info[#info+1]={"Clear Time",Times.estimate_text(Times.estimate(run)),tip={"Clear Time, Estimated","Estimated from Power DI's data, where its record of the match stops, as no clock timed this match.",
+   Times.counts(run,run.completion_time)and "Imported Matches Count For Records is on, so it counts as a clear time."or "An estimate counts for no best clear, record or average."}}
+ elseif run.victory and completion and type(completion.seconds)=="number"then
   local t=completion;local chosen=t.source=="mission_clock"and (opts.boss_map_timing and Times.boss_death(run)or marks.victory_request or marks.victory_transition or marks.win_condition~=marks.boss_death and marks.win_condition)
   local tip=t.source=="backend"and {"Clear Time","The mission's completion time, as the server reports it.","Every time is worked out this way, so results stay consistent across hardware, latency and each map's win conditions."}
    or t.source=="manual"and {"Clear Time","This time was typed in with Set Mission Time.","A Havoc 40 win not played from the start has no clock of its own."}
@@ -414,7 +417,7 @@ return function(view,cv,popup)
  end
  -- a Havoc 40 win merged from a rejoin has no clock of its own; its time can be typed in here
  if mod.io_manual_time_allowed and mod.io_manual_time_allowed(run)then
-  local label=run.completion_time and "Change Mission Time"or "Set Mission Time";local bx=D.right-150-16-190
+  local label=run.completion_time and run.completion_time.source=="manual"and "Change Mission Time"or "Set Mission Time";local bx=D.right-150-16-190
   view:_ctl(cv,"base",bx,D.top,190,34,function()mod.io_offer_manual_time(run.id,function()view.io_hist_rows=nil;view:_refresh()end)end,{hv={bg=C.fill_h}})
   cv:text(label,bx,D.top,190,34,16,C.value,"center")
  end

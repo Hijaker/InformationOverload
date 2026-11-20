@@ -6,6 +6,7 @@ local K=mod:io_dofile(base.."io_data_stats")
 local G=mod:io_dofile(base.."enemy_grouping")
 local E=mod:io_dofile(base.."enemy_catalog")
 local Times=mod:io_dofile(base.."mission_times")
+local Imported=mod:io_dofile(base.."imported_records")
 local C,KC,DASH,CN=D.c,K.c,K.dash,K.class_names
 local TABS={{"results","Results"},{"damage","Damage"},{"kills","Kills"},{"deaths","Deaths"},{"times","Clear Times"},{"share","Team Share"},{"classes","Classes"}}
 local X,W,CX,CW=D.left,D.width,D.left+25,D.width-50
@@ -80,20 +81,21 @@ local function results(view,cv,ms,y,tracker)
  end)
 end
 local function damage(view,cv,ms,y,tracker)
- local rec,max,best,sum,n={},0,nil,0,0
- for i,r in ipairs(ms)do local f=K.info(r);if f.dmg then rec[#rec+1]=r;if not best or f.dmg>max then max=f.dmg;best=i end;if not f.fb then sum=sum+f.dmg;n=n+1 end end end
+ -- a match imported from Power DI is drawn and averaged, and is the most only while Imported Matches Count For Records is on
+ local rec,peak,max,best,sum,n={},0,0,nil,0,0
+ for i,r in ipairs(ms)do local f=K.info(r);if f.dmg then rec[#rec+1]=r;peak=math.max(peak,f.dmg);if Imported.ranked(r)and (not best or f.dmg>max)then max=f.dmg;best=i end;if not f.fb then sum=sum+f.dmg;n=n+1 end end end
  if #rec==0 then return K.empty(view,cv,y,"No Damage Recorded Yet")end
  local avg=n>0 and sum/n or nil
  y=vcard(view,cv,y,"dmg","Damage Per Mission","Yours",352,function(cy)
-  K.stats(view,cv,X+36,cy+46,{{"Most",K.exact(max)},{"Average",avg and K.exact(avg)or DASH,avg and "Over "..K.plural(n,"Mission")},{"Missions",tostring(#rec)}})
+  K.stats(view,cv,X+36,cy+46,{{"Most",best and K.exact(max)or DASH},{"Average",avg and K.exact(avg)or DASH,avg and "Over "..K.plural(n,"Mission")},{"Missions",tostring(#rec)}})
   K.legend(view,cv,X+25,cy+100,{{"sq",KC.win,"Most Damage"},{"sq",KC.bar,"Other Missions"},{"ln",KC.ref,"Average"}})
-  local top=cy+124;local nt,ticks=K.nice(max*1.08,5);local x0,x1=CX+58,CX+CW-12;local yT,yB=top+14,top+186;local sw=(x1-x0)/#ms;local bw=math.min(24,sw*.6)
+  local top=cy+124;local nt,ticks=K.nice(peak*1.08,5);local x0,x1=CX+58,CX+CW-12;local yT,yB=top+14,top+186;local sw=(x1-x0)/#ms;local bw=math.min(24,sw*.6)
   local function yy(v)return yB-(yB-yT)*v/nt end
   K.day_axis(cv,ms,x0,sw,yT-6,yB,top+210);K.axis_y(cv,x0,x1,yy,ticks,K.tick)
   for i,r in ipairs(ms)do local v=K.info(r).dmg;local cx=x0+sw*(i-.5)
    if v then cv:rect(cx-bw/2,yy(v),bw,yB-yy(v),i==best and KC.win or KC.bar,true)else cv:rect(cx-4,yB-4,8,2,C.muted,true)end end
   if avg then cv:rect(x0,yy(avg),x1-x0,1,KC.ref,true)end
-  local bx=x0+sw*(best-.5);cv:text(K.exact(max),math.max(x0,math.min(bx-80,x1-160)),yy(max)-27,160,18,14,C.gold_hi,"center")
+  if best then local bx=x0+sw*(best-.5);cv:text(K.exact(max),math.max(x0,math.min(bx-80,x1-160)),yy(max)-27,160,18,14,C.gold_hi,"center")end
   hits(view,ms,x0,sw,yT-6,yB-yT+6,8)
  end,function()
   local rows={};for i=#ms,1,-1 do local r=ms[i];local f=K.info(r);rows[#rows+1]={K.date(r),name_of(tracker,r),CN[r.context.class]or DASH,result(r),f.dmg and (f.fb and {K.exact(f.dmg),"Weapon Hits"}or K.exact(f.dmg))or {DASH,nil,C.muted},act=K.open_run(view,r.id)}end
@@ -116,7 +118,7 @@ local function damage(view,cv,ms,y,tracker)
   return {{"Armour",10,"l"},{"Share",500},{"Useful Damage",800},{"Overkill %",W-48}},rows
  end)
 end
-local KT={{"mh","Melee Horde","k1"},{"rh","Ranged Horde","k2"},{"el","Elites","k3"},{"sp","Specials","k4"},{"bo","Bosses","k5"},{"no","No Type","bar"}}
+local KT={{"mh","Melee Horde","k1"},{"rh","Ranged Horde","k2"},{"el","Elites","k3"},{"sp","Specials","k4"},{"bo","Bosses","k5"},{"no","No Type","untyped"}}
 local function kills(view,cv,ms,y,tracker)
  local with={};local untyped=false;for _,r in ipairs(ms)do local t=K.info(r).types;if t then with[#with+1]=r;if t.no>0 then untyped=true end end end
  if #with==0 then return K.empty(view,cv,y,"No Kills By Type Yet")end
@@ -170,10 +172,12 @@ end
 -- a clear time follows the Boss Maps switch and a time typed in, so it is worked out each draw rather than kept
 local function times(view,cv,ms,y,tracker)
  local done,by,maps,tm={},{},{},{};local backend_maps={}
+ -- an imported match's estimate, counted while Imported Matches Count For Records is on, reads with its ~
+ local function shown(r,t,backend)if Times.estimate(r)then return Times.estimate_text(t)end;return (backend and Times.format or K.mmss)(t)end
  -- a time counts here only where Speedrunning counts it, so a late join or an unverified clock adds none
  local function counted(r)local t=r.victory and Times.completion(r);return t and t.source=="backend"and Times.counts(r,t)end
  for _,r in ipairs(ms)do if counted(r)then backend_maps[r.context.mission_name]=true end end
- for _,r in ipairs(ms)do local t=K.clear_time(r);local b=t and Times.completion(r).source=="backend";if t and Times.counts(r,Times.completion(r))and (not backend_maps[r.context.mission_name]or b)then tm[r]=t;done[#done+1]=r;local name=name_of(tracker,r);local m=by[name];if not m then m={map=name,runs={},fast=t,backend=b};by[name]=m;maps[#maps+1]=m end;m.runs[#m.runs+1]=r;m.fast=math.min(m.fast,t)end end
+ for _,r in ipairs(ms)do local t=K.clear_time(r);local b=t and Times.completion(r).source=="backend";if t and Times.counts(r,Times.completion(r))and (not backend_maps[r.context.mission_name]or b)then tm[r]=t;done[#done+1]=r;local name=name_of(tracker,r);local m=by[name];if not m then m={map=name,runs={},fast=t,fast_run=r,backend=b};by[name]=m;maps[#maps+1]=m end;m.runs[#m.runs+1]=r;if t<m.fast then m.fast,m.fast_run=t,r end end end
  if #done==0 then return K.empty(view,cv,y,"No Clear Times Yet")end
  -- different maps are ranked by their seconds, as map lengths differ far more than the server's times and the mission clock's do
  table.sort(maps,function(a,b)return a.fast<b.fast end)
@@ -189,17 +193,17 @@ local function times(view,cv,ms,y,tracker)
    cv:text(m.map,CX,yc-13,240,26,16,C.value);cv:rect(x0,yc,sx(m.fast)-x0,1,KC.grid,true)
    for _,r in ipairs(m.runs)do local t=tm[r];local cx=sx(t);local isf=t==m.fast
     K.dot(cv,cx,yc,isf and 6 or 4,isf and C.gold or KC.bar_h);view:_hit("base",cx-12,yc-12,24,24,K.open_run(view,r.id),{bg=C.row_h})end
-   cv:text((m.backend and Times.format or K.mmss)(m.fast),sx(m.fast)-114,yc-9,100,18,14,m.fast==best and C.gold or C.value,"right")
+   cv:text(shown(m.fast_run,m.fast,m.backend),sx(m.fast)-114,yc-9,100,18,14,m.fast==best and C.gold or C.value,"right")
    if m.fast==best and #m.runs==1 then cv:text("Fastest Of All",sx(m.fast)+14,yc-9,160,18,14,C.muted)end
   end
  end,function()
   local rows={};for _,m in ipairs(maps)do local rs={};for _,r in ipairs(m.runs)do rs[#rs+1]=r end;table.sort(rs,function(a,b)return tm[a]<tm[b]end)
-   for _,r in ipairs(rs)do local t=tm[r];rows[#rows+1]={m.map,K.date(r),CN[r.context.class]or DASH,t==m.fast and {(m.backend and Times.format or K.mmss)(t),"Fastest"}or (m.backend and Times.format or K.mmss)(t),act=K.open_run(view,r.id)}end end
+   for _,r in ipairs(rs)do local t=tm[r];rows[#rows+1]={m.map,K.date(r),CN[r.context.class]or DASH,t==m.fast and {shown(r,t,m.backend),"Fastest"}or shown(r,t,m.backend),act=K.open_run(view,r.id)}end end
   return {{"Map",10,"l"},{"Date",400,"l"},{"Class",650,"l"},{"Clear Time",W-48}},rows
  end)
  local t=tm[fast];local backend=Times.completion(fast).source=="backend"
  view:_card(cv,X,y,W,100,backend and "Your Fastest Backend Mission Time"or "Your Fastest Clear",name_of(tracker,fast).." · "..K.date(fast),K.open_run(view,fast.id))
- cv:text((backend and Times.format or K.mmss)(t),CX+12,y+48,CW-24,32,22,C.gold_hi)
+ cv:text(shown(fast,t,backend),CX+12,y+48,CW-24,32,22,C.gold_hi)
  return y+110
 end
 
@@ -207,35 +211,42 @@ local function share(view,cv,ms,y,tracker)
  local wait=K.warm(view,ms);local with={};for _,r in ipairs(ms)do if K.info(r).team then with[#with+1]=r end end
  if #with==0 then return K.empty(view,cv,y,wait>0 and "Counting Missions"or "No Team Damage Yet")end
  local function ratio(rs)local m,t=0,0;for _,r in ipairs(rs)do local x=K.info(r).team;m=m+x.mine;t=t+x.total end;return t>0 and m/t or 0 end
- local bestv,above=0,0;for _,r in ipairs(with)do local s=K.info(r).team.share;bestv=math.max(bestv,s);if s>.25 then above=above+1 end end
+ -- a mission is measured against an even split for the players in it; a solo one is all yours, so it counts for none of the numbers
+ local team={};for _,r in ipairs(with)do if #K.info(r).team.ops>1 then team[#team+1]=r end end
+ -- a squad is four at most: one who left and the one who took their place are one seat
+ local function size(t)return math.min(4,#t.ops)end
+ local best,above=nil,0;for _,r in ipairs(team)do local t=K.info(r).team;local n=size(t);if Imported.ranked(r)and(not best or t.share*n>best.share*size(best))then best=t end;if t.share>1/n then above=above+1 end end
  y=vcard(view,cv,y,"share","Your Share Of Useful Team Damage",wait>0 and "Counting "..K.plural(wait,"More Mission")or #with==#ms and "Every Mission"or #with.." Of "..#ms.." Missions",358,function(cy)
-  K.stats(view,cv,X+36,cy+46,{{"Share, All Missions",K.pc(ratio(with))},{"Best Mission",K.pc(bestv)},{"Above A Quarter",above.." Of "..#with}})
-  K.legend(view,cv,X+25,cy+100,{{"sq",C.gold,"You"},{"sq",KC.mate1,"Each Teammate"},{"ln",KC.ref,"Even Four-Way Split, 25%"}})
+  K.stats(view,cv,X+36,cy+46,{{"Share, Team Missions",#team>0 and K.pc(ratio(team))or DASH},{"Best Mission",best and K.pc(best.share,0).." Of "..size(best).." Players"or DASH},{"Above An Even Split",#team>0 and above.." Of "..#team or DASH}})
+  K.legend(view,cv,X+25,cy+100,{{"sq",C.gold,"You"},{"sq",KC.mate1,"Each Teammate"},{"ln",KC.ref,"Even Split For That Team"}})
   local top=cy+124;local x0,x1=CX+52,CX+CW-12;local yT,yB=top+14,top+192;local sw=(x1-x0)/#with;local bw=math.min(24,sw*.6)
   local function scale(v)return (yB-yT)*v end
   K.day_axis(cv,with,x0,sw,yT-6,yB,top+216);K.axis_y(cv,x0,x1,function(v)return yB-scale(v)end,{0,.25,.5,.75,1},function(v)return math.floor(v*100+.5).."%"end)
-  for i,r in ipairs(with)do local t=K.info(r).team;local parts={{t.share,C.gold}};local k=0
+  local function faded(c)return {math.floor(c[1]*.35+.5),c[2],c[3],c[4]}end
+  for i,r in ipairs(with)do local t=K.info(r).team;local n=size(t);local bx=x0+sw*(i-.5)-bw/2;local parts={{t.share,n>1 and C.gold or faded(C.gold)}};local k=0
    for _,o in ipairs(t.ops)do if not o.me then k=k+1;parts[#parts+1]={o.v/t.total,k%2==1 and KC.mate1 or KC.mate2}end end
-   K.stack(cv,x0+sw*(i-.5)-bw/2,yB,bw,parts,scale)end
-  cv:rect(x0,yB-scale(.25),x1-x0,1,KC.ref,true)
+   K.stack(cv,bx,yB,bw,parts,scale)
+   if n>1 then cv:rect(bx-4,yB-scale(1/n)-1,bw+8,2,KC.ref,true)end
+  end
   hits(view,with,x0,sw,yT-6,yB-yT+6,8)
  end,function()
   local rows={};for i=#with,1,-1 do local r=with[i];local t=K.info(r).team;rows[#rows+1]={K.dm(K.info(r).day),name_of(tracker,r),CN[r.context.class]or DASH,K.exact(t.mine),K.exact(t.total),K.pc(t.share),act=K.open_run(view,r.id)}end
   return {{"Date",10,"l"},{"Map",90,"l"},{"Class",420,"l"},{"Your Useful Damage",760},{"Team Useful Damage",980},{"Your Share",W-48}},rows
  end)
- local byc,order={},{};for _,r in ipairs(with)do local c=r.context.class;if not byc[c]then byc[c]={c=c,rs={}};order[#order+1]=byc[c]end;table.insert(byc[c].rs,r)end
- for _,c in ipairs(order)do c.avg=ratio(c.rs);c.best=0;for _,r in ipairs(c.rs)do c.best=math.max(c.best,K.info(r).team.share)end end
+ local byc,order={},{};for _,r in ipairs(team)do local c=r.context.class;if not byc[c]then byc[c]={c=c,rs={}};order[#order+1]=byc[c]end;table.insert(byc[c].rs,r)end
+ for _,c in ipairs(order)do c.avg=ratio(c.rs);c.even=0;for _,r in ipairs(c.rs)do local t=K.info(r).team;c.even=c.even+1/size(t)/#c.rs;if Imported.ranked(r)and(not c.best or t.share*size(t)>c.best.share*size(c.best))then c.best=t end end end
  table.sort(order,function(a,b)return a.avg>b.avg end)
+ if #order==0 then return y end
  return vcard(view,cv,y,"classshare","Share By Class",nil,46+#order*28+26+10,function(cy)
   local x0,x1=CX+130,CX+CW-170;local max=.5;for _,c in ipairs(order)do max=math.max(max,c.avg)end;local function sx(v)return x0+(x1-x0)*v/max end
-  local top=cy+46;cv:rect(sx(.25),top,1,#order*28,KC.ref,true);cv:text("25%",sx(.25)-30,top+#order*28+4,60,18,14,C.muted,"center")
+  local top=cy+46
   for i,c in ipairs(order)do local yc=top+(i-1)*28+14
    view:_hit("base",X+12,yc-14,W-24,28,function()view:_go("classes")end,{bg=C.row_h})
-   cv:text(CN[c.c]or c.c,CX,yc-13,128,26,16,C.label);cv:rect(x0,yc-8,sx(c.avg)-x0,16,C.gold,true)
+   cv:text(CN[c.c]or c.c,CX,yc-13,128,26,16,C.label);cv:rect(x0,yc-8,sx(c.avg)-x0,16,C.gold,true);cv:rect(sx(c.even)-1,yc-12,2,24,KC.ref,true)
    local pw=view:_w(K.pc(c.avg),14);cv:text(K.pc(c.avg),sx(c.avg)+10,yc-9,pw+4,18,14,C.value);cv:text(K.plural(#c.rs,"Mission"),sx(c.avg)+18+pw,yc-9,120,18,14,C.muted)
   end
  end,function()
-  local rows={};for _,c in ipairs(order)do rows[#rows+1]={CN[c.c]or c.c,tostring(#c.rs),K.pc(c.avg),K.pc(c.best),act=function()view:_go("classes")end}end
+  local rows={};for _,c in ipairs(order)do rows[#rows+1]={CN[c.c]or c.c,tostring(#c.rs),K.pc(c.avg),c.best and K.pc(c.best.share,0).." Of "..#c.best.ops.." Players"or DASH,act=function()view:_go("classes")end}end
   return {{"Class",10,"l"},{"Missions",500},{"Share",800},{"Best Mission",W-48}},rows
  end)
 end

@@ -106,14 +106,27 @@ local Averages=mod:io_dofile("InformationOverload/scripts/mods/InformationOverlo
 local TeamDamage=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/team_damage")
 local overview_cache=mod.io_data_get("history_overview_cache_v1")
 local prepare_job
-mod.io_overview_cache=function()return overview_cache and overview_cache.version==Averages.CACHE_VERSION and overview_cache.rows or prepare_job and prepare_job.out.rows or nil end
+local cache_signature
+-- a match number given again after the match that had it went belongs to another match, so a row kept for that number is used only while
+-- it was made from the match file the number names now; checked once each time the history changes
+local function fresh_rows()
+ local c=overview_cache;if not (c and c.version==Averages.CACHE_VERSION and c.rows)then return nil end
+ -- a match still saving has no file yet, so the check waits for it rather than pass its row
+ local sig=cache_signature();if c.checked~=sig then local tokens=c.tokens or {};local all=true
+  for _,run in ipairs(tracker.data.run_history or {})do local id=tostring(run.id);local ref=storage.history_refs[run]
+   if c.rows[id]~=nil and tokens[id]~=nil then if not ref then all=false elseif tokens[id]~=ref.desc.file then c.rows[id]=nil;if c.extremes then c.extremes[id]=nil end end end end
+  if all then c.checked=sig end
+ end
+ return c.rows
+end
+mod.io_overview_cache=function()return fresh_rows()or prepare_job and prepare_job.out.rows or nil end
 local revisions=Revision.new(mod.io_data_get("cache_revision_v1"),"0.5.32",tostring(APPLICATION_SETTINGS and APPLICATION_SETTINGS.game_version or game_patch()))
 local function hub_ready()
  local manager=Managers.state and Managers.state.mission
  local name=manager and manager:mission_name()
  return name and Missions[name]and Missions[name].is_hub==true
 end
-local function cache_signature()
+function cache_signature()
  return tostring(tracker.data.run_sequence or 0)..":"..tostring(tracker.data.history_policy_revision or 0)
 end
 -- Only expose a complete projection for the currently committed history.
@@ -163,7 +176,7 @@ local blo_boosted=setmetatable({},{__mode="k"})
 mod.records = tracker -- Integration API for the next collectors; not a global.
 
 -- a match's exclusion flag follows the policy and a save does not compare it, so it is set here rather than taken from the file
-local function follow_policy(data)for _,run in ipairs(data.run_history or {})do run.stats_excluded=not HistoryRecalculation.enabled(run,history_policy)or nil end end
+local function follow_policy(data,pause)for i,run in ipairs(data.run_history or {})do if pause and i%500==0 then pause()end;run.stats_excluded=not HistoryRecalculation.enabled(run,history_policy)or nil end end
 follow_policy(tracker.data)
 local FriendStats=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/friend_stats")
 local friend_summaries=mod.io_data_get("friend_summaries_v1")or {}
@@ -279,6 +292,8 @@ end
 -- clicked just before goes first with it.
 local first_keys={}
 local function save_click(...)
+ -- a held import still saving keeps going: the keys stay marked and the save after it takes them, where settling here would restart it
+ if storage.job and storage.job.hold then return end
  -- in a mission, or with a reset, restore, import or new stats group still to save, everything is saved at once as before
  local whole=not storage.settle or tracker.mission or solo_tracker.mission or collectors and collectors:partial_pending()or storage.staged_backups or storage.prune
  for _ in pairs(storage.inheritances or {})do whole=true end
@@ -303,10 +318,12 @@ display_options.split_enemies=nil
 mod.io_display_options=function()return display_options end
 mod.io_set_display_option=function(key,value)display_options[key]=value;mod.io_data_set("display_options_v1",display_options);save_click("display_options_v1")end
 mod.io_history_policy=function()return history_policy end
-mod.io_toggle_history_policy=function(key)
- history_policy[key]=history_policy[key]==false;tracker.data.history_policy_revision=(tracker.data.history_policy_revision or 0)+1;tracker.dirty=true;history_policy_dirty=true
+-- what counts changed: statistics are rebuilt in the hub, and the saved revision makes a relaunch before then rebuild too
+local function policy_changed()
+ tracker.data.history_policy_revision=(tracker.data.history_policy_revision or 0)+1;tracker.dirty=true;history_policy_dirty=true
  history_policy.revision=tracker.data.history_policy_revision;mod.io_data_set("history_policy_v1",history_policy);save_click("history_policy_v1")
 end
+mod.io_toggle_history_policy=function(key)history_policy[key]=history_policy[key]==false;policy_changed()end
 
 local function context(action, allow_training_blo, global_blo)
     local mission_manager = Managers.state.mission
@@ -444,6 +461,7 @@ local function loading_screen()local ui=Managers.ui;return ui and ui.view_active
 -- a replay that failed is not tried again until what it reads changes, or it would fail and redo its work every frame
 local cache_failed
 local function update_derived_cache(dt)
+ if storage.job and storage.job.hold then return end
  local hidden=loading_screen()
  if not (hub_ready()or hidden)or tracker.mission or collectors and collectors:partial_pending()then hub_wait=0;rebuild_job=nil;return end
  if not hidden then hub_wait=hub_wait+dt end
@@ -560,7 +578,8 @@ local warm_off,dt_now=false,0
 local function update_stats()
     elapsed=elapsed+dt_now
     -- In a mission the checkpoint runs a minute apart, a couple of milliseconds a frame.
-    if storage.job then local ok=storage:step();if ok=="baseline"then save(true,true,true)else saved_ok(ok)end
+    -- a held job, a Power DI import's commit, is stepped by its owner
+    if storage.job then if not storage.job.hold then local ok=storage:step();if ok=="baseline"then save(true,true,true)else saved_ok(ok)end end
     elseif not collectors or not collectors.recovery_ready or collectors:recovery_ready()then
         if click_rest or elapsed>=(tracker.mission and 60 or 15)then elapsed=0;click_rest=nil;click_job=nil;save(true,true,true)
         -- from a mission's first calm moment its recovery baseline is built over frames, so the checkpoint written as it ends need not build it
@@ -584,6 +603,8 @@ local tidy_off=false
 mod.update = function(dt)
     dt_now=dt
     if mod.io_step_history_import then mod.io_step_history_import()end
+    -- a Power DI import that faults is dropped, rather than faulting every frame; its fault goes to the log, never chat
+    if mod.io_step_powerdi then local began=slow_trace.start();local ok,err=pcall(mod.io_step_powerdi);slow_trace.finish("Power DI",began);if not ok then pcall(mod.io_powerdi_fault,err)end end
     -- switched off, only a save already under way is finished
     if not mod:is_enabled()then if storage.job then frame("Save",update_stats)end;return end
     local manager = Managers.state and Managers.state.mission
@@ -623,7 +644,10 @@ mod.on_game_state_changed = function(status, state)
         boundary(true); psykhanium_session, psykhanium_manager = nil, nil
     end
 end
+local ImportedRecords=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/imported_records")
 mod.on_setting_changed = function(id)
+    -- Imported Matches Count For Records changes which matches hold records, so it rebuilds them as a Counting switch does
+    if id==ImportedRecords.KEY then return policy_changed() end
     if id~="disable_psykhanium_tracking" and id~="capture_blo" then return end
     -- Only the Psykhanium changes what is tracked live; a mission keeps its run and only closes the open BLO chain.
     if mod.io_is_training() then boundary()
@@ -1101,6 +1125,8 @@ do
     local function seconds_of(r)
         Times = Times or mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/mission_times")
         local t = Times.completion(r)
+        -- an imported match's estimate is never given here, whatever Imported Matches Count For Records says
+        if t and t.source == Times.ESTIMATE then return nil end
         if r.victory and t and t.source == "mission_clock" then
             local marks, boss = r.completion_markers or {}, mod.io_display_options().boss_map_timing
             local chosen = boss and Times.boss_death(r) or marks.victory_request or marks.victory_transition or marks.win_condition ~= marks.boss_death and marks.win_condition
@@ -1115,7 +1141,7 @@ do
         local own_useful, team_useful, own_reported = damage_of(r)
         return {
             id = r.id, victory = r.victory, full = r.full ~= false, run_kind = r.run_kind, started_at = r.started_at,
-            seconds = seconds_of(r),
+            seconds = seconds_of(r), imported = type(r.imported) == "table",
             mission = c.mission_name, display_name = c.mission_display_name, difficulty = c.difficulty, mode = c.mode, patch = c.patch,
             class = c.class, character = c.character ~= nil and tostring(c.character) or nil, character_name = c.character_name,
             kills = { total = type(r.kills) == "number" and r.kills or 0, elite = k.elite or 0, special = k.special or 0, boss = k.boss or 0 },
@@ -1286,12 +1312,13 @@ mod.io_delete_match=function(id,source)
  local prior=target.data;local old_baseline=history_baseline;local old_friends=friend_summaries
  storage:set(key,updated)
  local psyk_done=target==tracker and psyk.stage(PsykSummary.counted(prior),PsykSummary.counted(updated))
- if target==tracker then storage:set("history_baseline_v1",baseline);storage:set("friend_summaries_v1",{})end
+ local forget;if target==tracker then storage:set("history_baseline_v1",baseline);storage:set("friend_summaries_v1",{});forget=HistoryDeletion.remember(storage,prior,updated)end
+ local unforget=HistoryDeletion.forget(storage,source=="solo"and "solo"or source=="logs"and "logs"or "lifetime",prior,updated)
  local ok,err=storage:flush()
  if psyk_done then psyk_done(ok)end
  if not ok then
-  storage:set(key,prior)
-  if target==tracker then storage:set("history_baseline_v1",old_baseline);storage:set("friend_summaries_v1",old_friends)end
+  storage:set(key,prior);unforget()
+  if target==tracker then storage:set("history_baseline_v1",old_baseline);storage:set("friend_summaries_v1",old_friends);forget()end
   return false,"The match could not be deleted because saving failed."
  end
  target.data=updated;target.blo_weapon_trackers={};target.dirty=false
@@ -1308,42 +1335,102 @@ local job
 local function busy()
  return tracker.mission or solo_tracker.mission or collectors and collectors:partial_pending()
 end
--- One frame: an Import's backup of the matches it replaces lands in the same commit as the history that replaces them.
-local function commit(updated,baseline,import,renumbered)
+-- Match History's Delete: the matches go in one rebuild, and the history they were in is kept as a backup in the same commit
+mod.io_delete_matches=function(ids)
+ if not mod.io_current()then return false end
+ if busy()then return false,"Finish the current mission and resolve any pending result before deleting matches."end
+ tracker:finish_blo_trial()
+ local updated,baseline=HistoryDeletion.prepare(Records,HistoryRecalculation,tracker.data,ids,history_policy,false,history_baseline)
+ if not updated then return false,baseline end
+ local prior,old_baseline,old_friends=tracker.data,history_baseline,friend_summaries
+ local backup,seq=Backup.deleted(storage,{lifetime=prior},os and os.date and os.date("%Y-%m-%d %H:%M:%S"),ids)
+ if backup==nil then return false,seq end
+ -- a delete never lowers the counter: the backup holds every number it took, siblings and missing files included
+ local hi=0;for _,id in ipairs(ids)do hi=math.max(hi,tonumber(id)or 0)end
+ updated.run_sequence=math.max(prior.run_sequence or 0,updated.run_sequence or 0,hi)
+ storage:set("lifetime_records_v1",updated)
+ local psyk_done=psyk.stage(PsykSummary.counted(prior),PsykSummary.counted(updated))
+ storage:set("history_baseline_v1",baseline);storage:set("friend_summaries_v1",{});local forget=HistoryDeletion.remember(storage,prior,updated)
+ local ok=storage:flush()
+ if psyk_done then psyk_done(ok)end
+ if not ok then
+  storage:unstage();storage:set("lifetime_records_v1",prior);storage:set("history_baseline_v1",old_baseline);storage:set("friend_summaries_v1",old_friends);forget()
+  return false,"The matches could not be deleted because saving failed."
+ end
+ tracker.data=updated;tracker.blo_weapon_trackers={};tracker.dirty=false
+ history_baseline=baseline;history_rebuilt_sequence=updated.run_sequence or 0;history_policy_dirty=false;segment_checked_sequence=updated.run_sequence or 0
+ friend_summaries={};friend_signature=nil;friend_people=nil;mod.io_friend_stats();storage:flush()
+ storage:release_details();return true
+end
+-- One frame: an import's backup of the history it adds to lands in the same commit as the history with them.
+-- Import Match History passes {merged,n}: its backup names the matches it adds by number.
+-- A Power DI import passes {sessions,known}: its backup names the sessions it adds, and the list of imported sessions lands in the same commit.
+local function commit(updated,baseline,import)
  local old,old_baseline,old_friends=tracker.data,history_baseline,friend_summaries
  local backup
- if import then
-  local seq;backup,seq=Backup.import(storage,{lifetime=old},os and os.date and os.date("%Y-%m-%d %H:%M:%S"))
+ local pdi=import and import.sessions and import or nil;local old_known
+ if pdi then
+  local seq;backup,seq=Backup.powerdi(storage,{lifetime=old},os and os.date and os.date("%Y-%m-%d %H:%M:%S"),pdi.sessions)
   if backup==nil then return false,seq end
-  updated.run_sequence=math.max(updated.run_sequence or 0,seq)
+  old_known=storage:get(Backup.POWERDI);storage:set(Backup.POWERDI,pdi.known)
+ elseif import then
+  local seq;backup,seq=Backup.import(storage,{lifetime=old},os and os.date and os.date("%Y-%m-%d %H:%M:%S"),import.merged,import.n)
+  if backup==nil then return false,seq end
  end
- updated.run_sequence=math.max(updated.run_sequence or 0,Backup.floor(storage,"lifetime"))
- storage:set("lifetime_records_v1",updated);storage:set("history_baseline_v1",baseline);storage:set("friend_summaries_v1",{})
+ -- an import carries the counter on from the highest number anything still holds, so numbers a restore took back out are given again;
+ -- any other commit keeps every number it has used
+ if import then updated.run_sequence=math.max(updated.run_sequence or 0,Backup.top(storage,updated,baseline))
+ else updated.run_sequence=math.max(updated.run_sequence or 0,Backup.floor(storage,"lifetime"))end
+ local cleared={}
+ storage:set("lifetime_records_v1",updated);storage:set("history_baseline_v1",baseline);storage:set("friend_summaries_v1",cleared)
+ -- memory follows the catalog the moment it commits; a held commit does it from inside the save, before the save's next pause
+ local followed=false
+ local function follow()followed=true
+  -- a player tracked or untracked while a held commit ran over frames stays as the player left them, and saves next
+  local live=tracker.data;local kept=live~=updated and live.friend_tracking_revision~=updated.friend_tracking_revision
+  if kept then updated.friend_tracking=live.friend_tracking;updated.friend_tracking_revision=live.friend_tracking_revision end
+  tracker.data=updated;tracker.blo_weapon_trackers={};tracker.dirty=kept;history_baseline=baseline;history_rebuilt_sequence=updated.run_sequence or 0;history_policy_dirty=false;segment_checked_sequence=updated.run_sequence or 0
+  friend_summaries={};friend_signature=nil;friend_people=nil;follow_policy(updated,function()storage:pause(true)end)
+ end
+ if storage.job and storage.job.hold then storage.job.on_commit=follow end
  local committed=storage:flush()
- if not committed then if import then storage:unstage()end;storage:set("lifetime_records_v1",old);storage:set("history_baseline_v1",old_baseline);storage:set("friend_summaries_v1",old_friends);return false,"Reconstruction could not be saved."end
- tracker.data=updated;follow_policy(updated);tracker.blo_weapon_trackers={};tracker.dirty=false;history_baseline=baseline;history_rebuilt_sequence=updated.run_sequence or 0;history_policy_dirty=false;segment_checked_sequence=updated.run_sequence or 0
- friend_summaries={};friend_signature=nil;friend_people=nil;mod.io_friend_stats();psyk.drop();storage:flush();storage:release_details()
- if not import then return true end
- local said={"Match History imported."}
- -- statistics that list no match, as ones from before match history, still go into the backup
- if backup then local n=backup.matches or 0
-  said[#said+1]=n==0 and "The statistics it replaced are in a backup."or n==1 and "The match it replaced is in a backup."or "The "..n.." matches it replaced are in a backup."
-  said[#said+1]=n==1 and "Restore Latest Backup brings it back."or "Restore Latest Backup brings them back."end
- if renumbered and renumbered>0 then said[#said+1]=(renumbered==1 and "1 imported match took a new number"or renumbered.." imported matches took new numbers").." after this PC's own."end
- return true,table.concat(said,"\n")
+ if storage.job and storage.job.hold then storage.job.on_commit=nil end
+ -- once memory followed, the catalog took it, whatever the save's tidying after said
+ committed=committed or followed
+ -- what it set goes back, but not what something else set while a held commit ran over frames
+ if not committed then if import then storage:unstage()end;local function back(key,mine,was)if storage:get(key)==mine then storage:set(key,was)end end
+  if pdi then back(Backup.POWERDI,pdi.known,old_known)end;back("lifetime_records_v1",updated,old);back("history_baseline_v1",baseline,old_baseline);back("friend_summaries_v1",cleared,old_friends);return false,"Reconstruction could not be saved."end
+ if not followed then follow()end
+ -- past its catalog commit a held commit stands, so a fault in the tidying after is logged rather than reported as a failure
+ local function tidy_up()storage:pause();mod.io_friend_stats();psyk.drop();storage:flush()end
+ if storage.job and storage.job.hold then local done,err=storage:try(tidy_up);if not done and mod.info then mod:info("I/O commit: after its catalog committed: %s",tostring(err))end else tidy_up()end
+ storage:release_details()
+ if pdi or not import then return true end
+ return true,Backup.matches(import.n).." added from the Import folder."
 end
+local NOTHING_NEW="No new matches were found in the Import folder."
+-- the folder's matches this PC holds in no history or backup, added to a copy of its history; nil when none are new
+local function merge_folder(data,pause)
+ local merged,ids,n=HistoryImport.merge(storage,HistoryImport.read(storage,pause),data.run_history,Backup.top(storage,data,history_baseline),pause)
+ if not merged then return nil end
+ local copy={};for k,v in pairs(data)do copy[k]=v end;copy.run_history=merged
+ return copy,{merged=ids,n=n}
+end
+local PowerDI
 mod.io_reconstruct_history=function(import_folder)
  if job then return false,"A match history import is already running."end
+ if PowerDI and PowerDI.busy()then return false,"A Power DI import is already running."end
  if busy()then return false,"Finish the current mission and resolve any pending result first."end
  tracker:finish_blo_trial()
- local renumbered=0
+ local added
  local ok,updated,baseline=pcall(function()
-  local history=import_folder and HistoryImport.read(storage)or nil
-  if history then renumbered=HistoryImport.renumber(storage,history,tracker.data.run_history,tracker.data.run_sequence)end
-  return HistoryImport.rebuild(Records,HistoryRecalculation,tracker.data,history_policy,history,MissionSegments,history_baseline)
+  local data=tracker.data
+  if import_folder then data,added=merge_folder(data);if not data then return nil end end
+  return HistoryImport.rebuild(Records,HistoryRecalculation,data,history_policy,nil,MissionSegments,history_baseline)
  end)
  if not ok then return false,(tostring(updated):gsub("^.-:%d+: ",""))end
- return commit(updated,baseline,import_folder,renumbered)
+ if not updated then return true,NOTHING_NEW end
+ return commit(updated,baseline,added)
 end
 local function now()return slow_trace.start()or 0 end
 local function begin(started)
@@ -1352,17 +1439,18 @@ local function begin(started)
   started=started,stage="read",slices=0,read=0,rebuild=0,peak=0,over=0}
  active.thread=coroutine.create(function()
   local function pause()if now()-active.slice_start>=3 then coroutine.yield()end end
-  local history=HistoryImport.read(storage,pause)
-  active.renumbered=HistoryImport.renumber(storage,history,data.run_history,data.run_sequence,pause)
-  active.matches=#history
+  local copy,added=merge_folder(data,pause)
+  if not copy then return nil end
+  active.added,active.matches=added,added.n
   active.stage="rebuild"
   coroutine.yield()
-  return HistoryImport.rebuild(Records,HistoryRecalculation,data,active.policy,history,MissionSegments,history_baseline,pause)
+  return HistoryImport.rebuild(Records,HistoryRecalculation,copy,active.policy,nil,MissionSegments,history_baseline,pause)
  end)
  return active
 end
 mod.io_start_history_import=function()
  if job then return false,"A match history import is already running."end
+ if PowerDI and PowerDI.busy()then return false,"A Power DI import is already running."end
  if busy()then return false,"Finish the current mission and resolve any pending result first."end
  tracker:finish_blo_trial()
  job=begin(now())
@@ -1390,17 +1478,65 @@ mod.io_step_history_import=function()
  if ok and coroutine.status(active.thread)~="dead"then return end
  job=nil
  local save_ms=0
+ if ok and not updated then
+  mod:info("Match History Import: complete, nothing new, %d slices, read %.1f ms, elapsed %.1f ms",active.slices,active.read,now()-active.started)
+  mod:echo("%s",NOTHING_NEW);return
+ end
  if ok then
   -- a player tracked or untracked while it ran stays as the player left them
   updated.friend_tracking=HistoryRecalculation.clone(tracker.data.friend_tracking);updated.friend_tracking_revision=tracker.data.friend_tracking_revision
   local began=now()
-  ok,updated=commit(updated,baseline,true,active.renumbered)
+  ok,updated=commit(updated,baseline,active.added)
   save_ms=now()-began
  end
  mod:info("Match History Import: %s, %d matches, %d slices, %d of them over 3 ms, read %.1f ms, rebuild %.1f ms, longest slice %.1f ms, save/finalize %.1f ms in one frame, elapsed %.1f ms",
   ok and "complete"or "failed",active.matches or 0,active.slices,active.over,active.read,active.rebuild,active.peak,save_ms,now()-active.started)
  if ok then mod:echo("%s",updated or "Statistics rebuilt.")else mod:echo("%s",(tostring(updated):gsub("^.-:%d+: ","")))end
 end
+-- the bytes a commit wrote for the imported matches: their own files, and each patch's lines file shared out by its matches; nil when one was not written
+local function written_for(sizes,sessions)
+ local want,mine={}, {};for _,s in ipairs(sessions or {})do want[s]=true end
+ for _,run in ipairs(tracker.data.run_history or {})do local s=type(run.imported)=="table"and run.imported.session;if s~=nil and want[s]then mine[tostring(run.id)]=true end end
+ local entry=storage.manifest and storage.manifest.entries and storage.manifest.entries.lifetime_records_v1;if not entry then return nil end
+ local total,count,ours=0,{},{}
+ for _,d in ipairs(entry.history or {})do local p=tostring(d.patch);count[p]=(count[p]or 0)+1
+  if mine[tostring(d.id)]then local n=sizes[d.file];if not n then return nil end;total=total+n;ours[p]=(ours[p]or 0)+1 end
+ end
+ for p,k in pairs(ours)do local l=entry.history_lines and entry.history_lines[p];local n=l and sizes[l.file];if n then total=total+n*k/count[p]end end
+ return math.floor(total+.5)
+end
+-- Import From Power DI adds to the history rather than replacing it, rebuilt as Rebuild Statistics does and saved in one commit with its backup
+PowerDI=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/power_di_import")({storage=storage,Backup=Backup,
+ data=function()return tracker.data end,baseline=function()return history_baseline end,
+ current=function(d)while replayed[d]and d~=tracker.data do d=replayed[d]end;return d end,
+ busy=busy,other=function()return job~=nil end,idle=function()return rebuild_job==nil end,
+ enabled=function()return mod:is_enabled()end,policy=function()return history_policy end,
+ patch=function()return game_patch()end,trim=function(run)Records.trim_saved(run)end,
+ -- the game's save folder, where Power DI's files sit, opened read-only to see which are still there; nil where it cannot be reached
+ save_folder=function()local lua=Mods and Mods.lua;local io,os=lua and lua.io,lua and lua.os;local app=os and os.getenv and os.getenv("APPDATA")
+  if not io or not io.open or type(app)~="string"or app==""then return nil end;local dir=app:gsub("\\","/").."/Fatshark/Darktide/"
+  return function(name)return io.open(dir..name,"rb")end end,
+ rebuild=function(d,pause)
+  local updated,baseline=HistoryImport.rebuild(Records,HistoryRecalculation,d,history_policy,nil,MissionSegments,history_baseline,pause)
+  -- a player tracked or untracked while it ran stays as the player left them
+  updated.friend_tracking=HistoryRecalculation.clone(tracker.data.friend_tracking);updated.friend_tracking_revision=tracker.data.friend_tracking_revision
+  return updated,baseline
+ end,
+ commit=commit,notify=function(text)mod.io_notify(text)end,now=now,
+ -- the same commit as a held storage job, stepped a few milliseconds a frame by the import, which is told what it wrote for the imported matches
+ commit_begin=function(updated,baseline,import)local h={data=updated}
+  h.job=storage:hold(function()h.ok,h.err=commit(updated,baseline,import);if h.ok then h.wrote=written_for(h.job.sizes or {},import.sessions)end;h.done=true end)
+  return h end,
+ info=function(...)if mod.info then mod:info(...)end end})
+mod.io_powerdi_request=PowerDI.request
+mod.io_powerdi_confirm=PowerDI.confirm
+mod.io_powerdi_cancel=PowerDI.cancel
+mod.io_powerdi_abort=PowerDI.abort
+mod.io_powerdi_fault=PowerDI.fault
+mod.io_powerdi_status=PowerDI.status
+mod.io_powerdi_dismiss=PowerDI.dismiss
+mod.io_powerdi_leave=PowerDI.leave
+mod.io_step_powerdi=PowerDI.step
 end
 mod.dashboard_model=part("Dashboard",function()return mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/dashboard_model")end)
 part("Views",function()mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/io_register")(mod)end)
@@ -1439,30 +1575,42 @@ mod.io_request_reset=function()
         mod:echo(fresh.kept and "All statistics moved into a backup." or "There were no statistics to move, so no backup was made.")
     end)
 end
+-- what restoring does to the matches, for the confirm and the Settings row alike
+mod.io_restore_effect=function(list,all)
+    -- a backup a Power DI import made takes the matches it imported back out
+    -- and one Import Match History made takes the matches it added back out
+    local taken,added,gone=0,0,0;for i=all and 1 or #list,#list do taken=taken+#(list[i].powerdi or {});added=added+(list[i].added or 0);gone=gone+#(list[i].deleted or {})end
+    local out=taken>0 and added>0 and "The matches imported from Power DI and added from the Import folder are"or taken>0 and (taken==1 and "The match imported from Power DI is"or "The "..taken.." matches imported from Power DI are")
+     or added>0 and (added==1 and "The match added from the Import folder is"or "The "..added.." matches added from the Import folder are")
+    -- and one Match History's Delete made brings the deleted matches back
+    local back=gone>0 and (gone==1 and "The deleted match comes back"or "The "..gone.." deleted matches come back")
+    return out and out.." taken back out"..(back and ", "..back:sub(1,1):lower()..back:sub(2)or "")..", and matches played since are kept."
+     or back and back..", and matches played since are kept."or "Matches played since the reset are kept."
+end
 mod.io_request_restore=function(all)
     local list=mod.io_backups();if not list[1]then mod:echo("There are no backups to restore.");return end
     if tracker.mission or solo_tracker.mission or collectors and collectors:partial_pending()then mod:echo("Finish the current mission and resolve any pending result first.");return end
-    local what=Backup.describe(list,all)
-    confirm("restoring a backup",all and #list>1 and "Restore All Backups"or "Restore Latest Backup","Bring back "..what.."? Matches played since the reset are kept.\n\nStatistics are rebuilt from all of them.","Restore",function()
+    local body="Bring back "..Backup.describe(list,all).."? "..mod.io_restore_effect(list,all)
+    confirm("restoring a backup",all and #list>1 and "Restore All Backups"or "Restore Latest Backup",body.."\n\nStatistics are rebuilt from all of them.","Restore",function()
         tracker:finish_blo_trial()
         local merged,brought=Backup.restore(storage,{R=Records,H=HistoryRecalculation,M=MissionSegments,I=HistoryImport},history_policy,statistics(),all)
         if not merged then mod:echo("%s",brought);return end
         tracker.data=merged.lifetime;follow_policy(tracker.data);tracker.blo_weapon_trackers={};tracker.dirty=false;solo_tracker.data=merged.solo;solo_tracker.blo_weapon_trackers={};solo_tracker.dirty=false;psykhanium_logs.data=merged.logs;psykhanium_logs.dirty=false
         history_baseline=merged.baseline;history_rebuilt_sequence=merged.lifetime.run_sequence or 0;history_policy_dirty=false;segment_checked_sequence=history_rebuilt_sequence
         friend_summaries={};friend_signature=nil;friend_people=nil;mod.io_friend_stats();psyk.drop();storage:flush();storage:release_details()
-        mod:echo("Backup restored. %s brought back.",Backup.matches(brought))
+        mod:echo("Backup restored.")
     end)
 end
 mod.io_request_delete_backups=function()
     local list=mod.io_backups();if not list[1]then mod:echo("There are no backups to delete.");return end
     confirm("deleting backups","Delete Backups","Delete "..(#list==1 and "the backup"or "all "..#list.." backups").." for good? Your current statistics are kept.\n\nThis cannot be undone.","Yes, delete",function()
-        local ok,err=Backup.delete(storage);mod:echo("%s",ok and "Backups deleted." or err)
+        local ok,err=Backup.delete(storage,tracker.data.run_history);mod:echo("%s",ok and "Backups deleted." or err)
     end)
 end
 mod:command("io_reset", "Move all saved statistics into a backup, after a confirmation", mod.io_request_reset)
 mod:command("io_restore", "Bring back the latest backup, after a confirmation", function()mod.io_request_restore(false)end)
 
-mod.version="1.1.0"
+mod.version="1.1.1"
 
 
 -- Draft integration seam for the data interface; no UI/navigation changes.
@@ -1496,7 +1644,7 @@ local MissionTimes=mod:io_dofile("InformationOverload/scripts/mods/InformationOv
 -- a Havoc 40 win merged from a rejoin has no clock of its own, so Match History offers its time to be typed in
 mod.io_manual_time_allowed=function(run)
  return run and run.victory==true and run.full==false and not run.data_only and run.context and run.context.mode=="havoc"and tonumber(run.context.difficulty)==40
-  and not MissionTimes.backend(run)and (run.completion_time==nil or run.completion_time.source=="manual")or false
+  and not MissionTimes.backend(run)and (run.completion_time==nil or run.completion_time.source=="manual"or run.completion_time.source==MissionTimes.ESTIMATE)or false
 end
 mod.io_offer_manual_time=function(id,done)
  local popup_id;local error_text="Enter the full mission completion time as minutes:seconds, for example 18:42."

@@ -10,7 +10,7 @@ local H=mod:io_dofile(base.."history_presentation")
 local C,rgba,DASH=D.c,D.rgba,Overview.dash
 local K={dash=DASH,class_names=Overview.class_names}
 K.c={bar=rgba(112,128,101),bar_h=rgba(142,160,128),win=rgba(221,183,99),loss=rgba(205,120,96),mate1=rgba(84,96,78),mate2=rgba(62,72,58),
- k1=rgba(74,163,107),k2=rgba(74,140,196),k3=rgba(184,134,42),k4=rgba(168,116,208),k5=rgba(208,100,78),down=rgba(224,164,143),death=rgba(196,88,63),
+ k1=rgba(118,140,112),k2=rgba(100,126,148),k3=rgba(160,138,94),k4=rgba(136,120,156),k5=rgba(164,108,96),untyped=rgba(92,92,90),down=rgba(224,164,143),death=rgba(196,88,63),
  grid=rgba(169,191,153,.11),band=rgba(169,191,153,.035),ref=rgba(216,229,207,.5),track=rgba(169,191,153,.1),blue=rgba(74,136,207),amber=rgba(185,138,46),
  meter=rgba(150,166,136),surf=rgba(10,14,10),head=rgba(13,17,13)}
 K.ARM={{"unarmored","Unarmoured"},{"armored","Flak"},{"berserker","Maniac"},{"super_armor","Carapace"},{"resistant","Unyielding"},{"disgustingly_resilient","Infested"}}

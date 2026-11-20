@@ -193,7 +193,9 @@ local function saved_card(view,cv,data,y)
   local tip={s.weapon,s.op..", "..(s.blessings or DASH),"Duration: "..P.mss(s.dur)}
   if del then local on=del[s.id]
    -- the live session has nothing saved yet, so it takes no tick while deleting
-   if not s.live then view:_hit("base",x+12,yy,w-24,44,function()del[s.id]=not on or nil end,{bg=C.row_h},nil,tip)end
+   if not s.live then local h=view:_hit("base",x+12,yy,w-24,44,function()del[s.id]=not on or nil end,{bg=C.row_h},nil,tip)
+    -- held and dragged, the press ticks or clears every session the pointer passes over
+    if h then h.state=on==true;h.paint=function(v)del[s.id]=v or nil end end end
    cv.z=5;if not s.live then cv:edges(x+16,yy+15,14,14,1,on and C.bad or C.hover);if on then cv:rect(x+19,yy+18,8,8,C.bad)end end;ti=nil
   else
    view:_hit("base",x+12,yy,w-24,44,function()

@@ -3,6 +3,7 @@ local mod=get_mod("information_overload")
 local base="InformationOverload/scripts/mods/InformationOverload/"
 local Overview=mod:io_dofile(base.."io_overview")
 local Records=mod:io_dofile(base.."records")
+local Imported=mod:io_dofile(base.."imported_records")
 local Times=mod:io_dofile(base.."mission_times")
 local I=mod:io_dofile(base.."player_identity")
 local B={}
@@ -25,6 +26,8 @@ local function timed(runs)local backend=false;for _,r in ipairs(runs)do if r.won
 -- the player's own useful damage, as Most Damage In A Mission counts it, so none for a match with no squad tally
 local function damage(run)return (Records.run_useful(run))end
 function B.clock(s)s=math.floor(s);return string.format("%d:%02d",math.floor(s/60),s%60)end
+-- a run's clear time as the board writes it, an imported match's estimate with its ~
+function B.time_text(r,s)s=s or r.time;return r.est and Times.estimate_text(s)or B.clock(s)end
 local function num(n)return Overview.commas(math.floor(n+.5))end
 local function loc(key)if type(key)~="string"then return end;local ok,s=pcall(Localize,key);if ok and type(s)=="string"and s~=key and s~=""and not s:find("<unlocalized",1,true)then return s end end
 local MissionTemplates,MissionTypes,Zones=require("scripts/settings/mission/mission_templates"),require("scripts/settings/mission/mission_types"),require("scripts/settings/zones/zones")
@@ -74,7 +77,7 @@ function B.map(index,key,basis)
  local m={key=key,type=kind,zone=zone,runs={},won_with={}};m.base,m.desig=B.split(name)
  local byp,mates={},{}
  for _,run in ipairs(list)do local c=run.context;local ev=events(run);local time,backend=clear(run,basis)
-  m.runs[#m.runs+1]={date=day(run.started_at),diff=B.diff(c),cls=cls(c.class),won=run.victory==true,time=time,backend=backend,dmg=damage(run),tracked=ev~=nil,events=ev or {},partial=run.full==false}
+  m.runs[#m.runs+1]={date=day(run.started_at),diff=B.diff(c),cls=cls(c.class),won=run.victory==true,time=time,backend=backend,dmg=damage(run),imported=run.imported~=nil,ranked=Imported.ranked(run),est=Times.estimate(run)~=nil,tracked=ev~=nil,events=ev or {},partial=run.full==false}
   if run.victory then for _,set in ipairs({c.operative_roster or {},I.team_accounts(index.tracker.data,c)})do for id,p in pairs(set)do local k=mate(c,id,p)
    if k and not byp[k]then local x={who=p.steam_name or p.friend_name or p.name or "Steam Name Unavailable",cls=p.class and cls(p.class)or DASH,all=index.people[k]or {0,0}};byp[k]=x;mates[#mates+1]=x end end end end
  end
@@ -140,11 +143,12 @@ end
 -- the stat cells, two to a row; an odd last cell spans the row
 function B.stats(m)
  local w,l=record(m.runs);local cells={{"Won",math.floor(w/#m.runs*100+.5).."%",w.." Won, "..l.." Lost"}}
- local best,sum,list=nil,0,timed(m.runs)
- for _,r in ipairs(list)do sum=sum+r.time;if not best or r.time<best.time then best=r end end
- if best then cells[#cells+1]={"Best Clear",B.clock(best.time),best.diff.." · "..best.date,gold=true}
-  if #list>1 then cells[#cells+1]={"Average Clear",B.clock(sum/#list),"Of "..#list.." Timed Wins"}end end
- local top;for _,r in ipairs(m.runs)do if r.dmg and (not top or r.dmg>top.dmg)then top=r end end
+ local best,sum,list,est=nil,0,timed(m.runs),false
+ for _,r in ipairs(list)do sum=sum+r.time;est=est or r.est;if not best or r.time<best.time then best=r end end
+ if best then cells[#cells+1]={"Best Clear",B.time_text(best),best.diff.." · "..best.date,gold=true}
+  if #list>1 then cells[#cells+1]={"Average Clear",B.time_text({est=est},sum/#list),"Of "..#list.." Timed Wins"}end end
+ -- a match imported from Power DI is never the best, unless Imported Matches Count For Records is on
+ local top;for _,r in ipairs(m.runs)do if r.dmg and r.ranked and (not top or r.dmg>top.dmg)then top=r end end
  if top then cells[#cells+1]={"Best Damage",num(top.dmg),top.cls.." · "..top.date.." · "..(top.won and "Won"or "Lost"),gold=true}end
  if #cells%2==1 then cells[#cells].wide=true end
  return cells
@@ -230,7 +234,7 @@ function B.layout(m,bd,rows,air,ms,nrun)
   g2[#g2+1]=pad(function(y)return para(vs,y,21)end)
   groups[#groups+1]=g2
   local timedbest,tb,dmgbest;for _,r in ipairs(timed(runs))do if not timedbest or r.time<timedbest then timedbest,tb=r.time,r.backend end end
-  for _,r in ipairs(runs)do if r.dmg and (not dmgbest or r.dmg>dmgbest)then dmgbest=r.dmg end end
+  for _,r in ipairs(runs)do if r.dmg and r.ranked and (not dmgbest or r.dmg>dmgbest)then dmgbest=r.dmg end end
   local lit=false;for _,r in ipairs(runs)do if r.diff==bd then lit=true end end
   groups[#groups+1]={pad(function(y)
    y=hd(y,"Runs, Newest First",lit and bd.." Highlighted"or nil)+4
@@ -240,8 +244,8 @@ function B.layout(m,bd,rows,air,ms,nrun)
     local dim=on and C.white or C.grey
     text(r.date,X+16,y,58,rh,15,dim);text(r.diff,X+74,y,92,rh,15,C.white);local cl=cut(r.cls,15,MED,152,ms);text(cl,X+166,y,152,rh,15,dim)
     if r.partial then text("Partial",X+166+ms(cl,15,MED)+6,y,ms("Partial",15,MED),rh,15,C.rule)end
-    text(r.won and (r.time and B.clock(r.time)or "Won")or "Lost",X+318,y,56,rh,15,r.time and r.time==timedbest and r.backend==tb and C.gold or C.white,MED,"right")
-    text(r.dmg and num(r.dmg)or DASH,X+374,y,84,rh,15,r.dmg and r.dmg==dmgbest and #runs>1 and C.gold or C.white,MED,"right")
+    text(r.won and (r.time and B.time_text(r)or "Won")or "Lost",X+318,y,56,rh,15,r.time and r.time==timedbest and r.backend==tb and C.gold or C.white,MED,"right")
+    text(r.dmg and num(r.dmg)or DASH,X+374,y,84,rh,15,r.dmg and r.dmg==dmgbest and r.ranked and #runs>1 and C.gold or C.white,MED,"right")
     y=y+rh
    end
    return y
