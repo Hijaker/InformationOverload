@@ -15,7 +15,7 @@ return function(view,cv,popup)
  if not cur then det="all";cur=m.opts[1];view.io_death_det=nil end
  local show=view.io_death_view or "grouped"
  K.seg(view,cv,D.left,D.row2,"Show:",{{"grouped","Grouped"},{"individual","Individual"}},show,function(v)view.io_death_view=v end)
- K.dropdown(view,cv,popup,"io_ddet",D.right-280,D.row2,280,"Detail:",cur.label,det,m.opts,function(v)view.io_death_det=v~="all"and v or nil;view.io_death_up=nil end)
+ K.dropdown(view,cv,popup,"io_ddet",D.right-280,D.top,280,"Detail:",cur.label,det,m.opts,function(v)view.io_death_det=v~="all"and v or nil;view.io_death_up=nil end)
  -- an enemy opened from a group's list steps back up to that group
  local up;if det:sub(1,2)=="e:"then for _,o in ipairs(m.opts)do if o.value==view.io_death_up then up=o end end end
  local trail={{"Deaths",det~="all"and function()view.io_death_det=nil;view.io_death_up=nil end or nil}}
@@ -28,9 +28,11 @@ return function(view,cv,popup)
   local lrows=l and {{head=l.parts},{"Downs",pair(l.downs,K.share(l.downs,a.downs))},{"Deaths",pair(l.deaths,K.share(l.deaths,a.deaths))},{"Total",pair(l.total,K.share(l.total,a.total))}}
    or {{"Downs",DASH},{"Deaths",DASH},{"Total",DASH}}
   local per=function(n)return m.games>0 and pair(n,(string.format("%.1f",n/m.games):gsub("%.0$",""))," Per Game")or pair(n)end
-  local h1=K.card(view,cv,D.left,y,D.col,"Most Lethal Enemy",nil,lrows)
-  local h2=K.card(view,cv,D.col2,y,D.col,"Deaths And Downs",nil,{{"Total Deaths And Downs",per(a.total)},{"Downs",per(a.downs)},{"Deaths",per(a.deaths)}})
-  y=y+math.max(h1,h2)+14
+  local drows={{"Total Deaths And Downs",per(a.total)},{"Downs",per(a.downs)},{"Deaths",per(a.deaths)}}
+  -- the two cards end level
+  local h=52+math.max(K.rows_h(lrows),K.rows_h(drows))
+  K.card(view,cv,D.left,y,D.col,"Most Lethal Enemy",nil,lrows,nil,h);K.card(view,cv,D.col2,y,D.col,"Deaths And Downs",nil,drows,nil,h)
+  y=y+h+14
  end
  local function cells(v)return {v.downs,v.deaths,v.total}end
  local rows={}

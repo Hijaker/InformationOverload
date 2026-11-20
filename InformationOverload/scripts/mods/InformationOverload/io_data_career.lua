@@ -81,8 +81,9 @@ function K.rows(view,cv,x,y,w,rows)
  return ry-y
 end
 function K.rows_h(rows)local h=0;for _,r in ipairs(rows)do h=h+(r.big and 30 or 26)end;return h end
-function K.card(view,cv,x,y,w,title,sub,rows,jump)
- local h=52+K.rows_h(rows);view:_card(cv,x,y,w,h,title,nil,jump)
+-- h, when given, is the least height, so two cards side by side can end level
+function K.card(view,cv,x,y,w,title,sub,rows,jump,h)
+ h=math.max(h or 0,52+K.rows_h(rows));view:_card(cv,x,y,w,h,title,nil,jump)
  if sub then K.label(view,cv,K.parts(sub),x+46+view:_w(title,20),y+13,30,14,C.muted)end
  K.rows(view,cv,x,y+45,w,rows);return h
 end

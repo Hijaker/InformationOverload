@@ -14,7 +14,7 @@ return function(view,cv,popup)
  for _,z in ipairs(zones)do opts[#opts+1]={h=z.label};for _,m in ipairs(z.maps)do opts[#opts+1]={value=m.key,label=m.name,ind=1,n=m.time};if m.key==pick then chosen=m end end end
  if not chosen then view.io_speed_map=nil end
  local label=chosen and chosen.name or "All Maps"
- K.dropdown(view,cv,popup,"io_smap",D.right-280,D.row2,280,"Map:",label,chosen and chosen.key or "all",opts,function(v)view.io_speed_map=v~="all"and v or nil end)
+ K.dropdown(view,cv,popup,"io_smap",D.right-280,D.top,280,"Map:",label,chosen and chosen.key or "all",opts,function(v)view.io_speed_map=v~="all"and v or nil end)
  view.io_crumbs={{"Speedrunning",chosen and function()view.io_speed_map=nil end or nil},{label}}
  if #zones==0 then view:_card(cv,D.left,D.sheet,D.width,92,"No Clear Times Recorded Yet");return end
  view:_sheet(cv,D.sheet)

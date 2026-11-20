@@ -67,7 +67,7 @@ end
 local function shape(tracker,run)
  local c=run.context;local m={map=tracker:run_mission_name(c),faction=c.mode=="havoc"and Faction.label(c.havoc_faction)or nil}
  m.scope={{"Mode:",Overview.mode_names[c.mode]or DASH},{"Difficulty:",Overview.diff_label(c)},{"Patch:",c.patch and Patch.display(c.patch)or DASH}}
- local info={{"Date",run.started_at and H.timestamp(run.started_at)or DASH},{"Match","#"..tostring(run.id or DASH)},{"Result",(run.victory and "Victory"or "Defeat")..(run.full==false and ", Partial Mission"or "")..(type(run.imported)=="table"and ", Imported"or "")},
+ local info={{"Date",run.started_at and H.timestamp(run.started_at)or DASH},{"Match","#"..tostring(run.id and Overview.number(tracker,run.id)or DASH)},{"Result",(run.victory and "Victory"or "Defeat")..(run.full==false and ", Partial Mission"or "")..(type(run.imported)=="table"and ", Imported"or "")},
   {"Difficulty",Overview.diff_label(c)},{"Your Class",Overview.class_names[c.class]or DASH}}
  local mods={};for id,name in pairs(c.modifiers or {})do name=modifier(id,name);if type(name)=="string"and name~=""and not name:find("Fading",1,true)then mods[#mods+1]=name end end;table.sort(mods)
  if #mods>0 then info[#info+1]={"Modifiers",table.concat(mods,", ")}end
@@ -395,7 +395,7 @@ return function(view,cv,popup)
  local x=100;for _,s in ipairs(m.scope)do local lw=view:_w(s[1],16);cv:text(s[1],x,D.top,lw+4,34,16,C.label);local vw=view:_w(s[2],16);cv:text(s[2],x+lw+8,D.top,vw+6,34,16,C.value);x=x+lw+vw+40 end
  -- Use the existing transactional delete/rebuild action; never mutate history here.
  if mod.io_delete_match then
-  view:_ctl(cv,"base",D.right-150,D.top,150,34,function()
+  view:_ctl(cv,"base",D.right-150,D.row2,150,34,function()
    local event=Managers.event;if not event then return end
    local selected=run.id
    event:trigger("event_show_ui_popup",{title_text_unlocalized="Delete Match",description_text_unlocalized="Delete this match and rebuild records and streaks from the remaining Match History?\n\nThis cannot be undone.",options={
@@ -413,7 +413,7 @@ return function(view,cv,popup)
     end},
     {text="Cancel",no_localization=true,close_on_pressed=true,hotkey="back"}}})
   end,{hv={bg=C.fill_h,edge=C.bad}})
-  cv:text("Delete Match",D.right-150,D.top,150,34,16,C.bad,"center")
+  cv:text("Delete Match",D.right-150,D.row2,150,34,16,C.bad,"center")
  end
  -- a Havoc 40 win merged from a rejoin has no clock of its own; its time can be typed in here
  if mod.io_manual_time_allowed and mod.io_manual_time_allowed(run)then

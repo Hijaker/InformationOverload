@@ -36,7 +36,8 @@ return function(view,cv,popup)
  elseif tab=="clutches"then
   if #t.clutches==0 then view:_card(cv,D.left,y+2,D.width,92,"No Clutches Yet")
   else local col={D.sheet+2,D.sheet+2};local x2={D.left,D.col2}
-   for i,p in ipairs(t.clutches)do local c=(i-1)%2+1;local h=52+#p.rows*26
+   -- the two cards side by side end level, as tall as the longer
+   for i,p in ipairs(t.clutches)do local c=(i-1)%2+1;local mate=t.clutches[c==1 and i+1 or i-1];local h=52+math.max(#p.rows,mate and #mate.rows or 0)*26
     if c==1 and i>1 then local top=math.max(col[1],col[2]);col[1],col[2]=top,top end
     local cy=col[c];view:_card(cv,x2[c],cy,D.col,h,p.name);cv.z=5;view:_rows(cv,x2[c],cy+45,D.col,p.rows);col[c]=cy+h+10
    end

@@ -131,7 +131,7 @@ local function runs(view,cv,popup,st,rows,mode)
  if del then
   local doomed={};for _,r in ipairs(list)do if del[r.id]then doomed[#doomed+1]=r.id end end
   P.button(view,cv,D.right-110,D.row2,110,34,"Cancel",function()view.io_hist_deleting=nil end)
-  local n=#doomed;local lab=n>0 and "Delete "..n or "Select";local bw=math.max(150,view:_w(lab,16)+32)
+  local n=#doomed;local lab=n>0 and "Delete "..n or "Delete";local bw=math.max(150,view:_w(lab,16)+32)
   P.button(view,cv,D.right-120-bw,D.row2,bw,34,lab,function()
    local event=Managers.event;if not event or not mod.io_delete_matches then return end
    local one=n==1
@@ -151,7 +151,7 @@ local function runs(view,cv,popup,st,rows,mode)
     {text="Cancel",no_localization=true,close_on_pressed=true,hotkey="back"}}})
   end,{dis=n==0,danger=n>0})
  else
-  P.button(view,cv,D.right-130,D.row2,130,34,"Delete",function()view.io_hist_deleting=true;view.io_hist_del={}end,{dis=#list==0,danger=#list>0})
+  P.button(view,cv,D.right-130,D.row2,130,34,"Select",function()view.io_hist_deleting=true;view.io_hist_del={}end,{dis=#list==0})
  end
  view:_sheet(cv,D.sheet)
  if #list==0 then no_match(view,cv,st);return view:_sheet_end(cv)end
@@ -193,7 +193,7 @@ local function runs(view,cv,popup,st,rows,mode)
   local dw=view:_w(r.date,16);cv:text(r.date,COLS.date,ry,dw+4,32,16,C.label,nil,nil,k);cv:text(r.clock,COLS.date+dw+6,ry,60,32,14,C.muted,nil,nil,k)
   if r.imported and not del then download(cv,D.left+4,ry+10,k)end
   -- the match's own number, the one its page shows, so it can be found again
-  cv:text("#"..tostring(r.id or DASH),COLS.id,ry,COLS.map-COLS.id-6,32,14,C.muted,"left",D.font.medium,k)
+  cv:text("#"..tostring(r.id and Overview.number(view:_tracker(),r.id)or DASH),COLS.id,ry,COLS.map-COLS.id-6,32,14,C.muted,"left",D.font.medium,k)
   local seed=mode=="havoc"and SEED[r.faction]
   local map_width=COLS.diff-COLS.map-12
   local seed_width=seed and view:_w(seed,10)or 0

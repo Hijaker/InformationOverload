@@ -161,15 +161,16 @@ local function saved_card(view,cv,data,y)
   if s.live then local tl=live_tl();d=tl and B.has_events(tl)and B.live_digest(tl)else d=B.cached(s.run)end
   fig[s]=d;local v=d and d.best.dps or 0;many[s.weapon]=(many[s.weapon]or 0)+1;top[s.weapon]=math.max(top[s.weapon]or 0,v)
  end
- -- two ticked sessions compare as A and B; Delete swaps the ticks for its own, as many saved sessions as wanted, gone for good after one confirmation
- -- Delete mode is a plain value on the view so Back, right click and forward step through it; the sessions marked live beside it
+ -- Select brings up a tick box on every row and turns into Compare, for two ticked sessions as A and B, and Delete, for every ticked saved session,
+ -- gone for good after one confirmation. A plain value on the view so Back, right click and forward step through it; ticks keep their order for A and B
  if view.io_psyk_deleting then view.io_psyk_del=view.io_psyk_del or {}else view.io_psyk_del=nil end
  local del=view.io_psyk_del
+ local function tick(id,v)local at;for i,t in ipairs(ticks)do if t==id then at=i end end
+  if v and not at then ticks[#ticks+1]=id;del[id]=true elseif not v and at then table.remove(ticks,at);del[id]=nil end end
  if del then
   local doomed={};for _,s in ipairs(data.saved)do if del[s.id]then doomed[#doomed+1]=s end end
-  P.button(view,cv,x+w-103,y+11,90,32,"Cancel",function()view.io_psyk_deleting=nil end)
-  local lab="Delete "..#doomed;local bw=view:_w(lab,16)+32
-  P.button(view,cv,x+w-113-bw,y+11,bw,32,lab,function()
+  local lab=#doomed>0 and "Delete "..#doomed or "Delete";local bw=math.max(90,view:_w(lab,16)+32)
+  P.button(view,cv,x+w-13-bw,y+11,bw,32,lab,function()
    local event=Managers.event;if not event or not mod.io_delete_match then return end
    local n=#doomed;local one=n==1
    event:trigger("event_show_ui_popup",{title_text_unlocalized=one and "Delete Session"or "Delete Sessions",
@@ -179,9 +180,9 @@ local function saved_card(view,cv,data,y)
      local kept={};for _,id in ipairs(view.io_psyk_ticks)do if not del[id]then kept[#kept+1]=id end end;view.io_psyk_ticks=kept;view.io_psyk_deleting=nil;view:_refresh()end},
     {text="Cancel",no_localization=true,close_on_pressed=true,hotkey="back"}}})
   end,{dis=#doomed==0,danger=#doomed>0})
+  P.button(view,cv,x+w-23-bw-100,y+11,100,32,"Compare",function()view.io_psyk_view="compare"end,{dis=#ticks~=2})
  else
-  P.button(view,cv,x+w-103,y+11,90,32,"Compare",function()view.io_psyk_view="compare"end,{dis=#ticks~=2})
-  P.button(view,cv,x+w-191,y+11,80,32,"Delete",function()view.io_psyk_deleting=true;view.io_psyk_del={}end,{dis=#data.saved==0})
+  P.button(view,cv,x+w-103,y+11,90,32,"Select",function()view.io_psyk_deleting=true;view.io_psyk_del={};view.io_psyk_ticks={}end,{dis=#list==0})
  end
  cv:text("Loadout",x+41,y+52,180,36,14,C.muted);cv:text("Shape",x+227,y+52,60,36,14,C.muted)
  cv:text("While",x+w-183,y+48,80,18,14,C.muted,"right");cv:text("Hitting",x+w-183,y+65,80,18,14,C.muted,"right")
@@ -189,18 +190,18 @@ local function saved_card(view,cv,data,y)
  cv:rect(x+12,y+88,w-24,1,C.frame,true)
  local yy=y+89
  if #list==0 then cv:text("No saved sessions yet.",x+36,yy+6,300,26,14,C.muted,"left",F.medium)end
- for _,s in ipairs(list)do local ti;for i,id in ipairs(ticks)do if id==s.id then ti=i end end
+  for _,s in ipairs(list)do local ti;for i,id in ipairs(ticks)do if id==s.id then ti=i end end
   local tip={s.weapon,s.op..", "..(s.blessings or DASH),"Duration: "..P.mss(s.dur)}
-  if del then local on=del[s.id]
-   -- the live session has nothing saved yet, so it takes no tick while deleting
-   if not s.live then local h=view:_hit("base",x+12,yy,w-24,44,function()del[s.id]=not on or nil end,{bg=C.row_h},nil,tip)
-    -- held and dragged, the press ticks or clears every session the pointer passes over
-    if h then h.state=on==true;h.paint=function(v)del[s.id]=v or nil end end end
-   cv.z=5;if not s.live then cv:edges(x+16,yy+15,14,14,1,on and C.bad or C.hover);if on then cv:rect(x+19,yy+18,8,8,C.bad)end end;ti=nil
+  if del then local on=ti~=nil
+   local h=view:_hit("base",x+12,yy,w-24,44,function()tick(s.id,not on)end,{bg=C.row_h},nil,tip)
+   -- held and dragged, the press ticks or clears every session the pointer passes over
+   if h then h.state=on;h.paint=function(v)tick(s.id,v)end end
+   cv.z=5;cv:edges(x+16,yy+15,14,14,1,on and C.sel or C.hover);if on then cv:rect(x+19,yy+18,8,8,C.gold)end
+   if #ticks>2 then ti=nil end
   else
-   view:_hit("base",x+12,yy,w-24,44,function()
-    if ti then table.remove(ticks,ti)else ticks[#ticks+1]=s.id;if #ticks>2 then table.remove(ticks,1)end end end,{bg=C.row_h},nil,tip)
-   cv.z=5;cv:edges(x+16,yy+15,14,14,1,ti and C.sel or C.hover);if ti then cv:rect(x+19,yy+18,8,8,C.gold)end
+   -- a click on a row starts selecting with that session ticked
+   view:_hit("base",x+12,yy,w-24,44,function()view.io_psyk_deleting=true;view.io_psyk_del={[s.id]=true};view.io_psyk_ticks={s.id}end,{bg=C.row_h},nil,tip)
+   ti=nil
   end
   local nx=x+41;if ti then cv:rect(nx,yy+5,16,16,AB[ti],nil,.4);cv:text(ti==1 and "A"or "B",nx,yy+5,16,16,13,C.value,"center");nx=nx+22 end
   cv:text(fit(view,s.weapon,15,x+216-nx),nx,yy+4,x+220-nx,20,15,C.value)
@@ -268,7 +269,7 @@ return function(view,cv,popup_cv)
  for i=#view.io_psyk_ticks,1,-1 do if not valid[view.io_psyk_ticks[i]]then table.remove(view.io_psyk_ticks,i)end end
  if view.io_psyk_view=="compare"and #view.io_psyk_ticks==2 and compare(view,cv,data)then return end
  view.io_psyk_view=nil
- view.io_crumbs=view.io_psyk_deleting and {{"Psykhanium"},{"Weapon Bench",function()view.io_psyk_deleting=nil end},{"Delete Sessions"}}or {{"Psykhanium"},{"Weapon Bench"}}
+ view.io_crumbs=view.io_psyk_deleting and {{"Psykhanium"},{"Weapon Bench",function()view.io_psyk_deleting=nil end},{"Select Sessions"}}or {{"Psykhanium"},{"Weapon Bench"}}
  local s=data.live;local cur=s or data.saved[1]
  if cur then local nw=math.min(view:_w(cur.weapon,16),400)
   cv:text(cur.weapon,112,D.top,nw+6,34,16,C.value)

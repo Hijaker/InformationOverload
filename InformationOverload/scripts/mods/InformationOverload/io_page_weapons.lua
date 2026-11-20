@@ -511,7 +511,7 @@ local function cut(view,s,size,w)
 end
 local FMTS={{"arm","By Armour (CSV)"},{"ene","By Enemy (CSV)"},{"json","Everything (JSON)"}}
 local function export_button(view,cv)
- local x,y=D.right-254,D.row2;local on=view.io_exporting
+ local x,y=D.right-254,D.top;local on=view.io_exporting
  view:_ctl(cv,"base",x,y,254,34,function()view.io_exporting=not on or nil end,{open=on})
  cv:rect(x+18,y+10,2,9,C.value,true);cv:chevron(x+14,y+14,"down",8,C.value);cv:rect(x+13,y+22,12,2,C.value,true)
  cv:text("Export Data Sheet",x+34,y,212,34,16,C.value)
@@ -603,7 +603,7 @@ return function(view,cv,popup)
   end
   table.sort(classes,function(a,b)return a.label<b.label end)
   table.insert(classes,1,{value="all",current=current,label="All Classes"})
-  K.dd(view,cv,popup,"weapon_class",D.right-530,D.row2,265,"Class:",CN[current]or "All Classes",classes,
+  K.dd(view,cv,popup,"weapon_class",D.right-265,D.row2,265,"Class:",CN[current]or "All Classes",classes,
    function(v)view.io_weap_class=v~="all"and v or nil;reset()end,true)
  end
  local function special_filter(x,w)
@@ -654,7 +654,7 @@ return function(view,cv,popup)
   end
   local sl=slot=="all"and "All Slots"or DOT_NAMES[slot]or SLOTN[slot]
   class_filter()
-  K.dd(view,cv,popup,"wslot",D.right-710,D.row2,170,"Slot:",sl,opts,function(v)view.io_weap_slot=v;reset()end,true);export_button(view,cv);elist=shown
+  K.dd(view,cv,popup,"wslot",D.right-445,D.row2,170,"Slot:",sl,opts,function(v)view.io_weap_slot=v;reset()end,true);export_button(view,cv);elist=shown
   view.io_crumbs={{"Weapons",lt=="compare"and function()view.io_weap_list="cards"end or nil},{lt=="compare"and "Compare"or "All Weapons"}}
   draw=function(y)
    if #shown==0 then view:_card(cv,X,y,W,92,view.io_weap_class and view.io_weap_class~="all"and "No Weapon Data For This Class In This Scope"or "No Weapon Data In This Scope");return end

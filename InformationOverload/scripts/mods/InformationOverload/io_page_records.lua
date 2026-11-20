@@ -47,9 +47,9 @@ return function(view,cv,popup)
    local dets=RD.details(rows,cls)
    local det=view.io_rec_detail or "overall";local label;for _,d in ipairs(dets)do if d[1]==det then label=d[2]end end;if not label then det="overall";label="Overall"end
    local copts={{value="all",current=cls or "all",label="All Classes"}};for _,c in ipairs(played)do copts[#copts+1]={value=c,current=cls or "all",label=CN[c]}end
-   K.dd(view,cv,popup,"rcls",800,D.row2,200,"Class:",cls and CN[cls]or "All",copts,function(v)view.io_rec_class=v~="all"and v or nil end)
+   K.dd(view,cv,popup,"rcls",D.right-490,D.top,200,"Class:",cls and CN[cls]or "All",copts,function(v)view.io_rec_class=v~="all"and v or nil end)
    local dopts={};for _,d in ipairs(dets)do dopts[#dopts+1]={value=d[1],current=det,label=d[2]}end
-   K.dd(view,cv,popup,"rdet",D.right-280,D.row2,280,"Detail:",label,dopts,function(v)view.io_rec_detail=v;reset()end)
+   K.dd(view,cv,popup,"rdet",D.right-280,D.top,280,"Detail:",label,dopts,function(v)view.io_rec_detail=v;reset()end)
    -- a crumb is a link only where it leads somewhere; at the page's start they all lead back to it
    local top=(cls or det~="overall")and function()view.io_rec_class=nil;view.io_rec_detail=nil end or nil
    view.io_crumbs={{"Records",top},{"Damage",top},{cls and CN[cls]or "All Classes",det~="overall"and function()view.io_rec_detail=nil end or nil},{label}}
@@ -57,7 +57,7 @@ return function(view,cv,popup)
   else
    local res=view.io_rec_result or "all";local label="All Missions";for _,r in ipairs(RES)do if r[1]==res then label=r[2]end end
    local opts={};for _,r in ipairs(RES)do opts[#opts+1]={value=r[1],current=res,label=r[2]}end
-   K.dd(view,cv,popup,"rres",D.right-280,D.row2,280,"Result:",label,opts,function(v)view.io_rec_result=v end)
+   K.dd(view,cv,popup,"rres",D.right-280,D.top,280,"Result:",label,opts,function(v)view.io_rec_result=v end)
    view.io_crumbs={{"Records",function()view.io_rec_tab="damage"end},{"Non-Damage",res~="all"and function()view.io_rec_result=nil end or nil},{label}}
    draw=function()nondamage(view,cv,tracker,s,res,D.sheet)end
   end

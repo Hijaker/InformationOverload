@@ -24,6 +24,18 @@ local function accepted(run,left_out)
  return c and not run.discarded and not run.hidden_contributions and (left_out or not run.stats_excluded)and not run.data_only and not c.training_history_test and c.difficulty~="psykhanium"and c.difficulty~="TEST ONLY"and type(run.victory)=="boolean"
 end
 O.accepted=accepted
+-- the # a match shows: its place among every mission in the order they were played, so a match imported later still reads in date order;
+-- the stored number stays as it is, so this one moves when matches are added or deleted
+local numbered=setmetatable({},{__mode="k"})
+function O.number(tracker,id)
+ local d=tracker and tracker.data;local hist=d and d.run_history;if not hist then return id end
+ local c=numbered[d];if not (c and c.n==#hist)then
+  local list={};for _,run in ipairs(hist)do if accepted(run,true)then list[#list+1]=run end end
+  table.sort(list,function(a,b)local x,y=tostring(a.started_at or ""),tostring(b.started_at or "");if x~=y then return x<y end;return (a.id or 0)<(b.id or 0)end)
+  c={n=#hist,by={}};for i,run in ipairs(list)do if run.id then c.by[run.id]=i end end;numbered[d]=c
+ end
+ return c.by[id]or id
+end
 function O.runs(tracker)
  local out={};for _,run in ipairs(tracker.data.run_history or {})do if accepted(run)then out[#out+1]=run end end
  table.sort(out,function(a,b)local x,y=tostring(a.started_at or ""),tostring(b.started_at or "");if x==y then return (a.id or 0)>(b.id or 0)end;return x>y end)
