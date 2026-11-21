@@ -70,6 +70,16 @@ local function added(storage,state,now,field,list,n)
 end
 function B.import(storage,state,now,ids,n)return added(storage,state,now,"merged",ids,n)end
 function B.powerdi(storage,state,now,sessions)return added(storage,state,now,"powerdi",sessions)end
+-- a Power DI import saved in batches keeps the one backup its first batch made, each later batch adding its missions to it in its own commit;
+-- nil when the newest backup is no longer that one
+function B.powerdi_more(storage,mark,sessions)
+ local list=storage.backups and storage:backups()or {};local last=list[#list]
+ if type(mark)~="table"or type(last)~="table"or type(last.powerdi)~="table"or mark.made~=nil and last.made~=mark.made or last.powerdi[1]~=mark.first then return nil end
+ local out={};for i,b in ipairs(list)do out[i]=b end
+ local b={};for k,v in pairs(last)do b[k]=v end
+ local ids={};for _,id in ipairs(last.powerdi)do ids[#ids+1]=id end;for _,id in ipairs(sessions)do ids[#ids+1]=id end
+ b.powerdi=ids;out[#out]=b;storage:stage(out,nil);return b
+end
 -- deleting matches from Match History keeps the history they were in, so restoring it brings them back
 function B.deleted(storage,state,now,ids)return added(storage,state,now,"deleted",ids)end
 local function imported(run,drop,ids)return drop and type(run.imported)=="table"and drop[run.imported.session]or ids and ids[run.id]or false end

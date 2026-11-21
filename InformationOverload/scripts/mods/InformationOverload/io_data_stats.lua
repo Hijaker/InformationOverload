@@ -110,7 +110,7 @@ function K.seg(view,cv,xr,y,list,cur,pick)
 end
 function K.dd(view,cv,popup,id,x,y,w,label,value,options,pick,gold)
  local open=view.dd==id
- view:_ctl(cv,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open})
+ local _,wh=view:_ctl(cv,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open});if view._wheel then view:_wheel(wh,options,pick)end
  local lw=view:_w(label,16);cv:text(label,x+12,y,lw+4,34,16,C.label);cv:pick(value,value,x+20+lw,y,w-lw-56,gold)
  cv:chevron(x+w-24,y+13,"down",10,C.value)
  if not open then return end

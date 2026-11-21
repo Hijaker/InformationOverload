@@ -37,7 +37,7 @@ end
 function K.empty(view,cv,title)view:_card(cv,D.left,D.row2,D.width,92,title or "No Missions Recorded Yet")end
 function K.dropdown(view,base,popup,id,x,y,w,label,value,current,options,pick)
  local open=view.dd==id
- view:_ctl(base,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open})
+ local _,wh=view:_ctl(base,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open});if view._wheel then view:_wheel(wh,options,pick,current)end
  local lw=view:_w(label,16);base:text(label,x+12,y,lw+4,34,16,C.label);base:pick(value,K.fit(view,value,16,w-lw-66),x+20+lw,y,w-lw-56)
  base:chevron(x+w-24,y+13,"down",10,C.value)
  if not open or #options==0 then return end

@@ -6,18 +6,35 @@ local base="InformationOverload/scripts/mods/InformationOverload/"
 local NOTICE={
  none={"No Power DI missions found.","Power DI's files belong in AppData\\Roaming\\Fatshark\\Darktide."},
  known={"Every completed Power DI mission is already imported."},
+ memory={"Not enough memory is free to import from Power DI.","Restart the game with fewer mods enabled to reduce the load."},
 }
 local SAID={
  done="I/O Import Complete",
- cancelled="The Power DI import was cancelled, so nothing was changed.",
- failed="The Power DI import failed, so nothing was changed.",
+ cancelled="The Power DI import was cancelled.",
+ failed="The Power DI import failed.",
  none="None of the Power DI missions could be imported.",
+ cancelled_part="The Power DI import was stopped, keeping the missions it had already saved.",
+ failed_part="The Power DI import failed, keeping the missions it had already saved.",
 }
+-- files whose header said they could not fit, left out
+function SAID.toobig(n)return n==1 and "1 mission was too big to load, so it was left out."or n.." missions were too big to load, so they were left out."end
 local LIFETIME="lifetime_records_v1"
 -- what the job may take of a frame, in ms
 local BUDGET=3
 -- a collector step, in KB of allocation it stands for: it starts at 64 and doubles or halves to keep a step near half a millisecond
 local GC_FIRST,GC_MIN,GC_MAX=64,16,1024
+-- Memory, in MB. The game gives Lua a fixed 1 GB however much the PC has, and a Power DI file loaded takes about twice what its header
+-- says it unpacks to, so before each file the import makes room for it:
+local CAP,MARGIN,LUA_PER_BYTE=1024,64,2
+-- the last file is collected first once the heap is over the larger of where the import began plus HEADROOM and WAIT; below that any file fits
+local HEADROOM,WAIT=64,550
+-- the missions held are saved once the heap, collected, is BATCH over where it began or past CEILING, never fewer than LEAST at a time
+local BATCH,CEILING,LEAST=256,600,20
+-- over START when the import is asked for, it does not start unless the player chooses Try Anyway
+local START=700
+-- while a save or its commit runs, which make garbage without loading anything, the collector starts each cycle as the last ends
+local PAUSE=100
+local function heap()return collectgarbage("count")/1024 end
 local DATE="^%d%d%d%d%-%d%d%-%d%d"
 -- E holds what the main file owns: the tracker's data, the hub replay, the rebuild, the commit and the clock
 return function(E)
@@ -60,6 +77,25 @@ return function(E)
    sweep(active);coroutine.yield()
   end
  end
+ -- inside the job's coroutine: the collector stepped a frame at a time until the cycles owed have ended, or sooner once over() is false
+ local function collect(active,over)while active.owed and (not over or over())do sweep(active);coroutine.yield()end end
+ -- before each file: the last one collected while the heap is high, the missions held saved once they take too much, and a file whose
+ -- header says it cannot fit even then left out; returns whether the file can be loaded. One such file took the game past the 1 GB on its own.
+ local function make_room(active,id)
+  local function high()return heap()>math.max(active.floor+HEADROOM,WAIT)end
+  collect(active,high)
+  -- a batch saved here leaves its own garbage, collected the same way before the file loads
+  local mark=math.min(active.floor+BATCH,CEILING)
+  if #active.runs>=LEAST and heap()>mark then collect(active);if heap()>mark then coroutine.yield("batch");collect(active,high)end end
+  local unpacked=active.unpacked[id];if not unpacked then return true end
+  local need=unpacked*LUA_PER_BYTE/1048576
+  local function short()return need>CAP-MARGIN-heap()end
+  if not short()then return true end
+  active.owed=math.max(active.owed or 0,2);collect(active)
+  -- a save frees only the missions held, so it is made only for a file that would fit at the heap the import began with
+  if short()and #active.runs>0 and need<=CAP-MARGIN-active.floor then coroutine.yield("batch");collect(active)end
+  return not short()
+ end
  local function known_set(pause)
   local known={}
   local saved=storage:get(Backup.POWERDI)
@@ -101,14 +137,22 @@ return function(E)
   local index=load(active,"power_di")
   local scan=convert().scan(index);index=nil
   if type(scan)~="table"or scan.missing or #(scan.ids or {})==0 then return "none"end
+  -- the list was read, so an ending with nothing to commit can clear a mark to pick up; an unreadable list leaves it for the next press
+  active.listed=true
   local known=known_set(pause)
   -- Power DI keeps its list long after a mission's own file is gone, so only missions whose file is still there are offered; where the
   -- folder cannot be looked at, each is offered and one with no file is just skipped
   local folder=E.save_folder and E.save_folder()
   -- and what each file weighs, for the result
   local sizes={};active.sizes=folder and sizes or nil
+  -- and what each unpacks to, from the size its header gives: four bytes, low first, twelve in
+  local unpacked={};active.unpacked=unpacked
   local function present(id)if not folder then return true end;pause();local f=folder(convert().file_name(id)..".sav")
-   if f then local ok,n=pcall(f.seek,f,"end");f:close();sizes[id]=ok and tonumber(n)or nil;return true end;return false end
+   if f then local okh,head=pcall(f.read,f,16);local ok,n=pcall(f.seek,f,"end");f:close();n=ok and tonumber(n)or nil;sizes[id]=n
+    -- trusted only from a header that is one: format 1, and the packed size it gives sixteen bytes short of the file
+    if okh and type(head)=="string"and #head==16 and n then local function u32(i)local a,b,c,dd=head:byte(i,i+3);return a+b*256+c*65536+dd*16777216 end
+     if u32(5)==1 and u32(9)+16==n then unpacked[id]=u32(13)end end
+    return true end;return false end
   local todo,held={},false;for i,id in ipairs(scan.ids)do if i%50==0 then pause()end;if known[id]then held=true elseif present(id)then todo[#todo+1]=id end end
   -- nothing left to bring in: "already imported" only when some are, else no files were found
   if #todo==0 then return held and "known"or "none"end
@@ -116,11 +160,11 @@ return function(E)
   local m=0;if scan.unfinished then for i,id in ipairs(scan.unfinished)do if i%50==0 then pause()end;if present(id)then m=m+1 end end else m=scan.incomplete or 0 end
   active.todo,active.n,active.m=todo,#todo,m
   active.stage="confirm";repeat coroutine.yield()until active.go
-  active.stage="run";active.i=0;active.runs={}
+  active.stage="run";active.i=0;active.runs={};active.floor=heap()
   local C=convert()
   for i,id in ipairs(todo)do pause()
    -- one Power DI table alive at a time: its cached reports go as it loads, and it is let go before the next load
-   local data=load(active,C.file_name(id))
+   local data;if make_room(active,id)then data=load(active,C.file_name(id))else active.toobig=(active.toobig or 0)+1 end
    if data then C.drop_heavy(data)
     local info=type(data.info)=="table"and data.info or {}
     if info.session_id==id and (info.outcome=="won"or info.outcome=="lost")then
@@ -165,6 +209,15 @@ return function(E)
   local updated,baseline=E.rebuild(copy,pause)
   return updated,baseline,sessions
  end
+ -- a mark to pick up counts only while the backup it names is still the newest, the one a later batch can add to
+ local function live_mark()local saved=storage:get(Backup.POWERDI);local r=type(saved)=="table"and saved.resume
+  if type(r)~="table"then return nil end;local list=storage.backups and storage:backups()or {};local b=list[#list]
+  if type(b)=="table"and type(b.powerdi)=="table"and b.powerdi[1]==r.first then return r end end
+ -- an import that ends with nothing more to commit no longer names a backup to pick up, so the next import makes its own
+ local function settle_resume()
+  local saved=storage:get(Backup.POWERDI)
+  if type(saved)=="table"and saved.resume~=nil then storage:set(Backup.POWERDI,{sessions=saved.sessions})end
+ end
  local function report(active,result)
   E.info("Power DI Import: %s, %d of %d missions converted, %d slices, longest slice %.1f ms, save/finalize %.1f ms over %d frames, longest of them %.1f ms, %d collector steps, elapsed %.1f ms",
    result,active.runs and #active.runs or 0,active.n or 0,active.slices,active.peak,active.fin,active.fin_frames,active.fin_peak,active.gc_steps,E.now()-active.started)
@@ -181,14 +234,40 @@ return function(E)
   for _,run in ipairs(E.data().run_history or {})do local s=type(run.imported)=="table"and run.imported.session;if s~=nil and want[s]then return true end end
   return false
  end
+ -- what the batches saved so far add up to, this one's added once it has saved
+ local function tally(active,h)
+  local t=active.saved or {ids={},pdi=0,io=0}
+  local ids={};for _,s in ipairs(t.ids)do ids[#ids+1]=s end;for _,s in ipairs(active.ids or {})do ids[#ids+1]=s end
+  local pdi=t.pdi and active.pdi_bytes and t.pdi+active.pdi_bytes or nil;local io=t.io and h.wrote and t.io+h.wrote or nil
+  return {ids=ids,pdi=pdi,io=io,base=h.data}
+ end
+ -- what earlier batches saved, while it still stands: a Restore or Reset since has taken it back out
+ local function kept(active)local t=active.saved;if t and t.ids[1]and stands(t.base,t.ids)then return t end end
+ -- the row's result for what has been saved, while those matches stand
+ local function result(t,base,toobig)if t and t.ids[1]then last={imported=#t.ids,ids=t.ids,base=base,pdi_bytes=t.pdi,io_bytes=t.io,toobig=toobig}end end
  -- the commit ended: saved, stopped before its catalog took it, or failed
  local function finish(active,h)
   if h.ok then
    -- a Restore or Reset that ran it out has taken the imports back out already; a match deleted meanwhile leaves them in
-   if not stands(h.data,active.ids)then return report(active,"complete, then taken out by a Restore or Reset")end
-   report(active,"complete");last={imported=active.sessions,ids=active.ids,base=h.data,pdi_bytes=active.pdi_bytes,io_bytes=h.wrote};return E.notify(SAID.done)end
-  if h.job.abort then report(active,"cancelled");return E.notify(SAID.cancelled)end
-  report(active,"failed: "..tostring(h.err));return E.notify(SAID.failed)
+   local t=tally(active,h)
+   if not stands(h.data,t.ids)then if job==active then job=nil end;return report(active,"complete, then taken out by a Restore or Reset")end
+   -- a batch saved: the next one goes on from the history it saved, its backup the one the first batch made
+   if active.more and job==active then
+    -- the backup that now names this batch's missions, the first batch's or a new one made where that one had gone
+    local list=storage:backups();local bk=list[#list];local ids=active.ids or {}
+    if bk and type(bk.powerdi)=="table"and ids[1]~=nil and bk.powerdi[#bk.powerdi]==ids[#ids]then active.mark={made=bk.made,first=bk.powerdi[1]}end
+    -- the save's garbage is collected before the next file loads, as each file's is
+    active.saved=t;active.more=nil;active.commit=nil;active.again=nil;active.runs={};active.ids=nil;active.owed=2
+    active.base,active.policy=h.data,revision();active.stage="run";active.co,active.main=active.main,nil
+    report(active,"batch saved");return
+   end
+   -- a batch saved as the import was stopped keeps what is saved
+   if active.more then report(active,"stopped after a batch");result(t,h.data,active.toobig);return E.notify(SAID.cancelled_part)end
+   report(active,"complete");result(t,h.data,active.toobig);return E.notify(SAID.done)end
+  -- what earlier batches saved stays, and the row says so
+  local part=kept(active);if part then result(part,E.data(),active.toobig)end
+  if h.job.abort then report(active,"cancelled");return E.notify(part and SAID.cancelled_part or SAID.cancelled)end
+  report(active,"failed: "..tostring(h.err));return E.notify(part and SAID.failed_part or SAID.failed)
  end
  -- a commit under way asked to stop runs out at once: before its catalog commit what it set goes back, after it the import stands
  local function stop(active)
@@ -200,15 +279,25 @@ return function(E)
   local active=job;job=nil
   if active and active.token then drain[#drain+1]=active.token;active.token=nil end
   if active and active.commit then return stop(active)end
+  -- once a batch has saved, those missions stay: the words say so and the row shows them
+  local part=active and kept(active)
+  if part then result(part,E.data(),active.toobig);said=said==SAID.failed and SAID.failed_part or said and SAID.cancelled_part end
   if said then E.notify(said)end
  end
- function J.request()
+ -- anyway: the player chose Try Anyway on the memory popup, so the memory check is passed by
+ function J.request(anyway)
   if job then return false,"A Power DI import is already running."end
   if E.busy()then return false,"Finish the current mission and resolve any pending result first."end
   if E.other and E.other()then return false,"A match history import is already running."end
   notice=nil
   if not SaveSystem then notice="none";return true end
+  -- only a heap already over the mark is collected in full to be sure, a single hitch on the press
+  if not anyway and heap()>START then collectgarbage("collect")
+   if heap()>START then notice="memory";return true end
+  end
   job={stage="index",base=E.data(),policy=revision(),started=E.now(),slices=0,peak=0,fin=0,fin_frames=0,fin_peak=0,gc_steps=0}
+  -- an import cut short after a batch, by Abort, a mission or the game closing, is picked up into the backup its first batch made
+  job.mark=live_mark()
   job.co=coroutine.create(main)
   return true
  end
@@ -224,16 +313,18 @@ return function(E)
  -- a fault in a frame's step goes to the log, and the import it stopped to the side notification
  function J.fault(err)E.info("Power DI import: %s",tostring(err));if job then cancel(SAID.failed)end end
  function J.busy()return job~=nil end
+ -- an import cut short after a batch can be picked up, so the row's button says Resume
+ function J.resumable()return live_mark()~=nil end
  function J.dismiss()notice=nil end
  -- the panel closing: an import still reading the list or waiting on its popup ends, as its popup can only open on Settings; one running goes on
  function J.leave()notice=nil;if job and (job.stage=="index"or job.stage=="confirm")then cancel()end end
  function J.status()
   local active=job
-  if active then return {stage=active.stage,i=active.i or 0,n=active.n or 0,m=active.m or 0,held=active.commit~=nil}end
+  if active then return {stage=active.stage,i=active.i or 0,n=active.n or 0,m=active.m or 0,held=active.commit~=nil,part=active.more or nil,resume=active.mark~=nil or nil}end
   if notice then return {stage="said",said=notice,lines=NOTICE[notice]}end
   -- the result shows while its matches are in the history in use, so a Restore or Reset since takes it away and a match deleted does not
   if last then if stands(last.base,last.ids)then last.base=E.data()else last=nil end end
-  if last then return {stage="done",imported=last.imported,pdi_bytes=last.pdi_bytes,io_bytes=last.io_bytes}end
+  if last then return {stage="done",imported=last.imported,pdi_bytes=last.pdi_bytes,io_bytes=last.io_bytes,toobig=last.toobig}end
  end
  -- the commit, a held storage job stepped here a few milliseconds a frame; a mission, or the mod switched off, stops it
  local function commit_step(active)
@@ -250,10 +341,10 @@ return function(E)
   if not h.ok and h.job.abort and (active.again or 0)<3 then local cur=E.current(active.base)
    if E.enabled()and not E.busy()and cur==E.data()then active.again=(active.again or 0)+1;active.commit,active.co=nil,nil;active.base,active.policy=cur,revision();return end
   end
-  job=nil;return finish(active,h)
+  -- a batch saved goes on from here; anything else ends the import
+  if not (h.ok and active.more)then job=nil end;return finish(active,h)
  end
- function J.step()
-  drain_step()
+ local function step()
   local active=job;if not active then return end
   if active.commit then return commit_step(active)end
   if not E.enabled()or E.busy()then return cancel(SAID.cancelled)end
@@ -272,19 +363,37 @@ return function(E)
   local ok,a,b,c=coroutine.resume(active.co,active)
   spent(active,E.now()-active.slice,stage=="save")
   if not ok then E.info("Power DI import: %s",tostring(a));report(active,"failed");return cancel(SAID.failed)end
+  -- a batch is ready: it is saved while the import waits, then the import goes on
+  if stage=="run"and a=="batch"and coroutine.status(active.co)=="suspended"then active.main,active.co=active.co,nil;active.stage="save";active.more=true;return end
   if coroutine.status(active.co)~="dead"then return end
   if stage~="save"then
    if a=="save"then active.stage="save";active.co=nil;return end
-   job=nil;if NOTICE[a]then notice=a;return end;return E.notify(SAID.failed)
+   job=nil;if active.listed then settle_resume()end;if NOTICE[a]then notice=a;return end;return E.notify(SAID.failed)
   end
   active.co=nil
-  -- the popup counted missions, so none brought in is a failure, not nothing found
-  if a==nil then job=nil;report(active,"nothing loaded");return E.notify(SAID.none)end
+  -- the popup counted missions, so none brought in is a failure, not nothing found; after a batch has saved, the import is complete
+  if a==nil and active.more then active.more=nil;active.runs={};active.co,active.main=active.main,nil;active.stage="run";return end
+  if a==nil and kept(active)then job=nil;settle_resume();report(active,"complete");result(kept(active),E.data(),active.toobig);return E.notify(SAID.done)end
+  -- nothing came in: when files were left out as too big, the notice says that rather than that none could be imported
+  if a==nil then job=nil;settle_resume();report(active,"nothing loaded");return E.notify((active.toobig or 0)>0 and SAID.toobig(active.toobig)or SAID.none)end
   local known={};local saved=storage:get(Backup.POWERDI)
   for id in pairs(type(saved)=="table"and type(saved.sessions)=="table"and saved.sessions or {})do known[id]=true end
   for _,id in ipairs(c)do known[id]=true end
   -- the backup, the history and the imported list in one commit, from the next frame on
-  active.sessions=#c;active.ids=c;active.commit=E.commit_begin(a,b,{sessions=c,known={sessions=known}})
+  -- a later batch adds its missions to the first batch's backup, so one Restore takes the whole import back out; while batches are still to
+  -- come the imported list names that backup by its first mission, so an import cut short is picked up into it
+  local resume=active.more and (active.mark and {first=active.mark.first}or {first=c[1]})or nil
+  active.sessions=#c;active.ids=c;active.commit=E.commit_begin(a,b,{sessions=c,known={sessions=known,resume=resume},extend=active.mark})
  end
+ -- the collector's pace set as the import starts and given back the frame it ends
+ local game_pause
+ local function pace()
+  -- only while a save or its commit runs, as the loads step the collector themselves and a constant pace slowed every file
+  local saving=job and (job.stage=="save"or job.commit~=nil)
+  if saving and not game_pause then game_pause=collectgarbage("setpause",PAUSE)elseif not saving and game_pause then collectgarbage("setpause",game_pause);game_pause=nil end
+ end
+ function J.step()drain_step();pace();step();pace()end
+ -- the mod unloading mid-import gives the game its own collector pace back
+ function J.release()if game_pause then collectgarbage("setpause",game_pause);game_pause=nil end end
  return J
 end

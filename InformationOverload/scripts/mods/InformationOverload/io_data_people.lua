@@ -48,7 +48,7 @@ function P.button(view,cv,x,y,w,h,label,fn,opt)
 end
 function P.select(view,cv,popup,id,x,y,w,value,options,pick)
  local open=view.dd==id
- view:_ctl(cv,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open})
+ local _,wh=view:_ctl(cv,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open});if view._wheel then view:_wheel(wh,options,pick)end
  cv:text(value,x+14,y,w-50,34,16,C.value);cv:chevron(x+w-24,y+13,"down",10,C.value)
  if not open then return end
  local sc=view.sheet;local sy=y+(sc and sc.dy or 0)

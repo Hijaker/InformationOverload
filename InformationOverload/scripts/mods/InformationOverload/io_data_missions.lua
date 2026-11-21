@@ -22,7 +22,7 @@ function M.one(n)if type(n)~="number"then return DASH end;local s=string.format(
 -- a dropdown anywhere on the page; options are {value,label,current,n,ind} or {head=label}
 function M.dropdown(view,cv,popup,id,x,y,w,label,value,options,pick)
  local open=view.dd==id
- view:_ctl(cv,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open})
+ local _,wh=view:_ctl(cv,"base",x,y,w,34,function()view.dd=not open and id or nil end,{open=open});if view._wheel then view:_wheel(wh,options,pick)end
  local lw=view:_w(label,16);local room=w-lw-56;local full=value
  -- cut with room to spare, as the game wraps a line a little short of the width measured
  if view:_w(value,16)>room-10 then local s=value;while #s>1 and view:_w(s.."...",16)>room-10 do repeat local b=s:byte(-1);s=s:sub(1,-2)until #s==0 or b<128 or b>=192 end;value=s.."..."end

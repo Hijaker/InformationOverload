@@ -128,6 +128,10 @@ local function runs(view,cv,popup,st,rows,mode)
  -- Delete brings up a tick box on every row; the ticked ones the filters still show are the ones deleted. A plain value on the view, so Back leaves it
  if view.io_hist_deleting then view.io_hist_del=view.io_hist_del or {}else view.io_hist_del=nil end
  local del=view.io_hist_del
+ -- greyed while a Power DI import runs, as a delete would change the history it is adding to
+ local held=mod.io_powerdi_busy and mod.io_powerdi_busy()or false
+ -- drawn again while greyed, so the buttons come back the moment the import ends
+ if held then view.redraw_at=math.min(view.redraw_at or math.huge,(view.now or 0)+.5)end
  if del then
   local doomed={};for _,r in ipairs(list)do if del[r.id]then doomed[#doomed+1]=r.id end end
   P.button(view,cv,D.right-110,D.row2,110,34,"Cancel",function()view.io_hist_deleting=nil end)
@@ -149,9 +153,9 @@ local function runs(view,cv,popup,st,rows,mode)
      for _,l in ipairs({view.io_steps or {},view.io_fwd or {}})do for i=#l,1,-1 do if l[i].page=="run"and gone[l[i].v["@run"]]then table.remove(l,i)end end end
      view.io_hist_deleting=nil;view.io_hist_del=nil;view:_refresh()end},
     {text="Cancel",no_localization=true,close_on_pressed=true,hotkey="back"}}})
-  end,{dis=n==0,danger=n>0})
+  end,{dis=n==0 or held,danger=n>0 and not held})
  else
-  P.button(view,cv,D.right-130,D.row2,130,34,"Select",function()view.io_hist_deleting=true;view.io_hist_del={}end,{dis=#list==0})
+  P.button(view,cv,D.right-130,D.row2,130,34,"Select",not held and function()view.io_hist_deleting=true;view.io_hist_del={}end or nil,{dis=#list==0 or held})
  end
  view:_sheet(cv,D.sheet)
  if #list==0 then no_match(view,cv,st);return view:_sheet_end(cv)end

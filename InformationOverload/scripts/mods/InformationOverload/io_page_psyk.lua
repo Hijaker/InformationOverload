@@ -167,6 +167,10 @@ local function saved_card(view,cv,data,y)
  local del=view.io_psyk_del
  local function tick(id,v)local at;for i,t in ipairs(ticks)do if t==id then at=i end end
   if v and not at then ticks[#ticks+1]=id;del[id]=true elseif not v and at then table.remove(ticks,at);del[id]=nil end end
+ -- greyed while a Power DI import runs, as a delete makes a backup the import's batches add to
+ local held=mod.io_powerdi_busy and mod.io_powerdi_busy()or false
+ -- drawn again while greyed, so the buttons come back the moment the import ends
+ if held then view.redraw_at=math.min(view.redraw_at or math.huge,(view.now or 0)+.5)end
  if del then
   local doomed={};for _,s in ipairs(data.saved)do if del[s.id]then doomed[#doomed+1]=s end end
   local lab=#doomed>0 and "Delete "..#doomed or "Delete";local bw=math.max(90,view:_w(lab,16)+32)
@@ -179,10 +183,10 @@ local function saved_card(view,cv,data,y)
      for _,s in ipairs(doomed)do local ok,reason=mod.io_delete_match(s.run.id,"logs");if not ok then mod:echo("%s",reason or "The session could not be deleted.");break end end
      local kept={};for _,id in ipairs(view.io_psyk_ticks)do if not del[id]then kept[#kept+1]=id end end;view.io_psyk_ticks=kept;view.io_psyk_deleting=nil;view:_refresh()end},
     {text="Cancel",no_localization=true,close_on_pressed=true,hotkey="back"}}})
-  end,{dis=#doomed==0,danger=#doomed>0})
+  end,{dis=#doomed==0 or held,danger=#doomed>0 and not held})
   P.button(view,cv,x+w-23-bw-100,y+11,100,32,"Compare",function()view.io_psyk_view="compare"end,{dis=#ticks~=2})
  else
-  P.button(view,cv,x+w-103,y+11,90,32,"Select",function()view.io_psyk_deleting=true;view.io_psyk_del={};view.io_psyk_ticks={}end,{dis=#list==0})
+  P.button(view,cv,x+w-103,y+11,90,32,"Select",not held and function()view.io_psyk_deleting=true;view.io_psyk_del={};view.io_psyk_ticks={}end or nil,{dis=#list==0 or held})
  end
  cv:text("Loadout",x+41,y+52,180,36,14,C.muted);cv:text("Shape",x+227,y+52,60,36,14,C.muted)
  cv:text("While",x+w-183,y+48,80,18,14,C.muted,"right");cv:text("Hitting",x+w-183,y+65,80,18,14,C.muted,"right")

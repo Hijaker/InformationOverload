@@ -1299,8 +1299,11 @@ save(true) -- Repair confirmed saved segment pairs before the first dashboard vi
 -- after a mods reload a popup still up belongs to the old load, so its answers do nothing
 function mod.io_current()return get_mod("information_overload")==mod end
 local HistoryDeletion=mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/history_deletion")
+-- deleting matches, Reset, Restore and Delete Backups wait while a Power DI import runs, as each would change the history or the backups its batches add to
+local POWERDI_RUNNING="A Power DI import is running. Wait for it to finish or Abort it first."
 mod.io_delete_match=function(id,source)
  if not mod.io_current()then return false end
+ if mod.io_powerdi_busy and mod.io_powerdi_busy()then return false,POWERDI_RUNNING end
  if tracker.mission or solo_tracker.mission or collectors and collectors:partial_pending()then
   return false,"Finish the current mission and resolve any pending result before deleting a match."
  end
@@ -1338,6 +1341,7 @@ end
 -- Match History's Delete: the matches go in one rebuild, and the history they were in is kept as a backup in the same commit
 mod.io_delete_matches=function(ids)
  if not mod.io_current()then return false end
+ if mod.io_powerdi_busy and mod.io_powerdi_busy()then return false,POWERDI_RUNNING end
  if busy()then return false,"Finish the current mission and resolve any pending result before deleting matches."end
  tracker:finish_blo_trial()
  local updated,baseline=HistoryDeletion.prepare(Records,HistoryRecalculation,tracker.data,ids,history_policy,false,history_baseline)
@@ -1370,7 +1374,12 @@ local function commit(updated,baseline,import)
  local backup
  local pdi=import and import.sessions and import or nil;local old_known
  if pdi then
-  local seq;backup,seq=Backup.powerdi(storage,{lifetime=old},os and os.date and os.date("%Y-%m-%d %H:%M:%S"),pdi.sessions)
+  local seq
+  -- a later batch of the same import adds to the backup its first batch made
+  if pdi.extend then backup=Backup.powerdi_more(storage,pdi.extend,pdi.sessions)end
+  -- a new backup names this batch's first mission, so a mark to pick up names it too
+  if backup==nil and pdi.known and pdi.known.resume then pdi.known.resume={first=pdi.sessions[1]}end
+  if backup==nil then backup,seq=Backup.powerdi(storage,{lifetime=old},os and os.date and os.date("%Y-%m-%d %H:%M:%S"),pdi.sessions)end
   if backup==nil then return false,seq end
   old_known=storage:get(Backup.POWERDI);storage:set(Backup.POWERDI,pdi.known)
  elseif import then
@@ -1534,9 +1543,13 @@ mod.io_powerdi_cancel=PowerDI.cancel
 mod.io_powerdi_abort=PowerDI.abort
 mod.io_powerdi_fault=PowerDI.fault
 mod.io_powerdi_status=PowerDI.status
+mod.io_powerdi_busy=PowerDI.busy
+mod.io_powerdi_resumable=PowerDI.resumable
+mod.io_powerdi_said=PowerDI.SAID
 mod.io_powerdi_dismiss=PowerDI.dismiss
 mod.io_powerdi_leave=PowerDI.leave
 mod.io_step_powerdi=PowerDI.step
+mod.io_powerdi_release=PowerDI.release
 end
 mod.dashboard_model=part("Dashboard",function()return mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/dashboard_model")end)
 part("Views",function()mod:io_dofile("InformationOverload/scripts/mods/InformationOverload/io_register")(mod)end)
@@ -1564,7 +1577,9 @@ end
 local function statistics()return {lifetime=tracker.data,solo=solo_tracker.data,logs=psykhanium_logs.data,baseline=history_baseline,friends=friend_summaries}end
 mod.io_backups=function()return storage.backups and storage:backups()or {}end
 mod.io_request_reset=function()
+    if mod.io_powerdi_busy and mod.io_powerdi_busy()then mod:echo("%s",POWERDI_RUNNING);return end
     confirm("resetting records","Reset Statistics","Move all saved Information Overload statistics across every patch, character and weapon into a backup? Settings are kept.\n\nRestore Latest Backup in Settings › Data brings them back.","Yes, reset",function()
+        if mod.io_powerdi_busy and mod.io_powerdi_busy()then mod:echo("%s",POWERDI_RUNNING);return end
         boundary();if collectors then collectors:forget_partial()end
         local fresh,err=Backup.reset(storage,Records,HistoryRecalculation,statistics(),os and os.date and os.date("%Y-%m-%d %H:%M:%S"))
         if not fresh then mod:echo("%s",err);return end
@@ -1575,6 +1590,26 @@ mod.io_request_reset=function()
         mod:echo(fresh.kept and "All statistics moved into a backup." or "There were no statistics to move, so no backup was made.")
     end)
 end
+-- matches played on this PC since a backup was made, which restoring it keeps
+mod.io_played_since=function(b)
+    if type(b)~="table"then return 0 end
+    -- by the missions the backup's history held where it lists them, else by number; imports and hidden data are no matches played
+    local held;if type(b.instances)=="table"then held={};for _,id in ipairs(b.instances)do held[id]=true end end
+    local seq=type(b.seq)=="table"and tonumber(b.seq.lifetime)or 0;local n=0
+    for _,run in ipairs(tracker.data.run_history or {})do
+        if type(run.imported)~="table"and not run.data_only and not run.hidden_contributions then
+            local c=type(run.context)=="table"and run.context.mission_instance
+            if held and c~=nil then if not held[c]then n=n+1 end elseif (tonumber(run.id)or 0)>seq then n=n+1 end
+        end
+    end
+    return n
+end
+-- of a backup's Power DI missions, those still in the history, which restoring it takes out
+mod.io_powerdi_held=function(b)
+    local want={};for _,id in ipairs(type(b)=="table"and b.powerdi or {})do want[id]=true end;local n=0
+    for _,run in ipairs(tracker.data.run_history or {})do local s=type(run.imported)=="table"and run.imported.session;if s~=nil and want[s]then n=n+1 end end
+    return n
+end
 -- what restoring does to the matches, for the confirm and the Settings row alike
 mod.io_restore_effect=function(list,all)
     -- a backup a Power DI import made takes the matches it imported back out
@@ -1584,15 +1619,19 @@ mod.io_restore_effect=function(list,all)
      or added>0 and (added==1 and "The match added from the Import folder is"or "The "..added.." matches added from the Import folder are")
     -- and one Match History's Delete made brings the deleted matches back
     local back=gone>0 and (gone==1 and "The deleted match comes back"or "The "..gone.." deleted matches come back")
-    return out and out.." taken back out"..(back and ", "..back:sub(1,1):lower()..back:sub(2)or "")..", and matches played since are kept."
-     or back and back..", and matches played since are kept."or "Matches played since the reset are kept."
+    return out and out.." taken back out"..(back and ", "..back:sub(1,1):lower()..back:sub(2)or "")..", matches played since are kept."
+     or back and back..", matches played since are kept."or "Matches played since the reset are kept."
 end
 mod.io_request_restore=function(all)
+    if mod.io_powerdi_busy and mod.io_powerdi_busy()then mod:echo("%s",POWERDI_RUNNING);return end
     local list=mod.io_backups();if not list[1]then mod:echo("There are no backups to restore.");return end
     if tracker.mission or solo_tracker.mission or collectors and collectors:partial_pending()then mod:echo("Finish the current mission and resolve any pending result first.");return end
-    local body="Bring back "..Backup.describe(list,all).."? "..mod.io_restore_effect(list,all)
-    confirm("restoring a backup",all and #list>1 and "Restore All Backups"or "Restore Latest Backup",body.."\n\nStatistics are rebuilt from all of them.","Restore",function()
+    local body="Bring back "..Backup.describe(list,all).."?\n"..mod.io_restore_effect(list,all)
+    confirm("restoring a backup",all and #list>1 and "Restore All Backups"or "Restore Latest Backup",body.."\nStatistics are rebuilt from all of them.","Restore",function()
+        if mod.io_powerdi_busy and mod.io_powerdi_busy()then mod:echo("%s",POWERDI_RUNNING);return end
         tracker:finish_blo_trial()
+        -- a held Power DI batch still saving is settled first, so the backups and history read here include it
+        if storage.settle then storage:settle()end
         local merged,brought=Backup.restore(storage,{R=Records,H=HistoryRecalculation,M=MissionSegments,I=HistoryImport},history_policy,statistics(),all)
         if not merged then mod:echo("%s",brought);return end
         tracker.data=merged.lifetime;follow_policy(tracker.data);tracker.blo_weapon_trackers={};tracker.dirty=false;solo_tracker.data=merged.solo;solo_tracker.blo_weapon_trackers={};solo_tracker.dirty=false;psykhanium_logs.data=merged.logs;psykhanium_logs.dirty=false
@@ -1602,8 +1641,10 @@ mod.io_request_restore=function(all)
     end)
 end
 mod.io_request_delete_backups=function()
+    if mod.io_powerdi_busy and mod.io_powerdi_busy()then mod:echo("%s",POWERDI_RUNNING);return end
     local list=mod.io_backups();if not list[1]then mod:echo("There are no backups to delete.");return end
     confirm("deleting backups","Delete Backups","Delete "..(#list==1 and "the backup"or "all "..#list.." backups").." for good? Your current statistics are kept.\n\nThis cannot be undone.","Yes, delete",function()
+        if mod.io_powerdi_busy and mod.io_powerdi_busy()then mod:echo("%s",POWERDI_RUNNING);return end
         local ok,err=Backup.delete(storage,tracker.data.run_history);mod:echo("%s",ok and "Backups deleted." or err)
     end)
 end
@@ -1691,6 +1732,7 @@ do
     end
     mod.on_unload = function(...)
         havoc.stop()
+        if mod.io_powerdi_release then pcall(mod.io_powerdi_release)end
         if unload then return unload(...) end
     end
     mod.on_setting_changed = function(id, ...)

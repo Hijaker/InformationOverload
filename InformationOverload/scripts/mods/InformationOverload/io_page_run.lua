@@ -395,7 +395,11 @@ return function(view,cv,popup)
  local x=100;for _,s in ipairs(m.scope)do local lw=view:_w(s[1],16);cv:text(s[1],x,D.top,lw+4,34,16,C.label);local vw=view:_w(s[2],16);cv:text(s[2],x+lw+8,D.top,vw+6,34,16,C.value);x=x+lw+vw+40 end
  -- Use the existing transactional delete/rebuild action; never mutate history here.
  if mod.io_delete_match then
-  view:_ctl(cv,"base",D.right-150,D.row2,150,34,function()
+  -- greyed while a Power DI import runs, as a delete would change the history it is adding to
+  local held=mod.io_powerdi_busy and mod.io_powerdi_busy()or false
+  -- drawn again while greyed, so the buttons come back the moment the import ends
+  if held then view.redraw_at=math.min(view.redraw_at or math.huge,(view.now or 0)+.5)end
+  view:_ctl(cv,"base",D.right-150,D.row2,150,34,not held and function()
    local event=Managers.event;if not event then return end
    local selected=run.id
    event:trigger("event_show_ui_popup",{title_text_unlocalized="Delete Match",description_text_unlocalized="Delete this match and rebuild records and streaks from the remaining Match History?\n\nThis cannot be undone.",options={
@@ -412,8 +416,8 @@ return function(view,cv,popup)
       local st=view.io_steps;if st and st[#st]and st[#st].page=="history"then st[#st]=nil end;view:_refresh()else mod:echo("%s",reason or "The match could not be deleted.")end
     end},
     {text="Cancel",no_localization=true,close_on_pressed=true,hotkey="back"}}})
-  end,{hv={bg=C.fill_h,edge=C.bad}})
-  cv:text("Delete Match",D.right-150,D.row2,150,34,16,C.bad,"center")
+  end or nil,{dis=held,hv={bg=C.fill_h,edge=C.bad}})
+  cv:text("Delete Match",D.right-150,D.row2,150,34,16,held and C.muted or C.bad,"center")
  end
  -- a Havoc 40 win merged from a rejoin has no clock of its own; its time can be typed in here
  if mod.io_manual_time_allowed and mod.io_manual_time_allowed(run)then

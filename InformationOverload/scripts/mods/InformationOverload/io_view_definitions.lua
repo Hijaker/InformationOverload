@@ -121,6 +121,14 @@ function Canvas:circle(cx,cy,r,c)
  self.over[#self.over+1]={pass_type="circle",style={color=copy(c),offset={cx-r,cy-r,self.z},size={2*r,2*r}}}
 end
 
+-- I/O's cog from the intro's rects, s across, turned by a degrees about its centre
+function Canvas:cog(rects,cx,cy,s,a,c)
+ if self.sc then local ok,y=fits(self.sc,cy-s/2,s);if not ok then return end;cy=y+s/2 end
+ local u=s/160;local lap=math.max(1,math.min(3,1.5/u));local rad=D.angle_sign*math.rad(a)
+ for _,r in ipairs(rects)do local ox,oy=r[1]*u,(r[2]-lap/2)*u
+  self.over[#self.over+1]={pass_type="rotated_rect",style={color=copy(c),offset={cx-s/2+ox,cy-s/2+oy,self.z+1},size={r[3]*u,(r[4]+lap)*u},angle=rad,pivot={s/2-ox,s/2-oy}}}
+ end
+end
 function Canvas:cross(cx,cy,len,t,c)
  for _,a in ipairs({math.pi/4,-math.pi/4})do
   self.over[#self.over+1]={pass_type="rotated_rect",style={color=copy(c),offset={cx-len/2,cy-t/2,2},size={len,t},angle=a,pivot={len/2,t/2}}}

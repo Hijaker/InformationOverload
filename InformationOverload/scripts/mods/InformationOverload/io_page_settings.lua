@@ -15,7 +15,7 @@ local Popup=mod:io_dofile(base.."io_popup")
 local Imported=mod:io_dofile(base.."imported_records")
 -- the switch under Import From Power DI
 local IMPORTED_TITLE="Imported Matches Count For Records"
-local IMPORTED_HELP="Lets imported matches hold records and bests, their estimated times included."
+local IMPORTED_HELP="Lets imported matches from other mods hold records and bests, their estimated times included."
 local C,F=D.c,D.font
 local X,W=D.left,D.width
 local RX=X+W-27
@@ -28,7 +28,8 @@ local function popup(title,body,label,fn)
 end
 local function row(view,cv,y,title,desc,msg,ctl,indent,dim)
  local x=X+(indent or 0);cv:rect(X+1,y,W-14,1,C.line,true)
- local lines=type(desc)=="table"and desc or desc and P.wrap(view,desc,14,1000,F.medium)or {}
+ -- the help wraps short of the row's switch, button or choice, so a long line never runs under it
+ local lines=type(desc)=="table"and desc or desc and P.wrap(view,desc,14,ctl and math.min(1000,RX-200-(x+36))or 1000,F.medium)or {}
  local sub=#lines>0 or msg~=nil
  cv:text(title,x+36,y+(sub and 8 or 0),700,sub and 24 or 55,indent and 14 or 16,dim and C.muted or indent and C.label or C.value)
  local ty=y+30
@@ -267,54 +268,92 @@ local function powerdi_row(view,cv,y)
  local desc={"Import & convert completed missions from Power DI into I/O.","Power DI files are left unchanged. Your current matches will not be overwritten."}
  local start=function()local ok,why=mod.io_powerdi_request();if not ok and mod.io_notify then mod.io_notify(why)end end
  if st and (st.stage=="run"or st.stage=="save")then view.redraw_at=(view.now or 0)+.25
-  local done,n=st.stage=="save"and st.n or st.i,math.max(1,st.n)
-  -- Abort until the final save begins; from then it shows greyed out, as the save must not be cut
+  local done,n=st.stage=="save"and not st.part and st.n or st.i,math.max(1,st.n)
+  -- Abort until a save begins, the final one or a batch saved on the way; while one runs it shows greyed out, as the save must not be cut
   local abort=not st.held and function()if mod.io_powerdi_abort then mod.io_powerdi_abort()end end or nil
-  return row(view,cv,y,"Import From Power DI",{"You will notice some stutter until it finishes."},nil,function(ry,rh)
+  return row(view,cv,y,"Import From Power DI",{"You will notice some stutter until it finishes.",""},nil,function(ry,rh)
    -- the bar runs along the row's foot from under the title and stops short of Abort, the count sitting on its right end
    local bx,by=X+36,ry+rh-10;local bw=RX-126-bx
    cv:rect(bx,by,bw,6,C.fill);cv:rect(bx,by,math.floor(bw*math.min(1,done/n)+.5),6,C.gold,true)
    cv:text(done.." of "..st.n,bx+bw-200,by-22,200,20,13,C.label,"right",F.medium)
    -- the button centred at the row's right, past the bar's end
-   P.button(view,cv,RX-110,ry+math.floor((rh-34)/2),110,34,"Abort",abort,{dis=st.held})end)
+   P.button(view,cv,RX-110,ry+math.floor((rh-34)/2),110,34,st.held and "Saving"or "Abort",abort,{dis=st.held})end)
+ end
+ -- reading Power DI's list and checking its files can take a while before the popup, so the row says so, its dots counting up
+ if st and st.stage=="index"then desc={"Reading Power DI's missions"..string.rep(".",1+math.floor((view.now or 0)*2)%3),""}end
+ -- while the list is read the button holds I/O's cog, turning
+ if st and st.stage=="index"then view.redraw_at=(view.now or 0)+.05
+  -- kept on mod, as io_dofile runs a file again on every call
+  mod.io_cog_rects=mod.io_cog_rects or mod:io_dofile(base.."io_intro").RECTS;local rects=mod.io_cog_rects
+  return row(view,cv,y,"Import From Power DI",desc,nil,function(ry,rh)local by=ry+math.floor((rh-34)/2)
+   P.button(view,cv,RX-160,by,160,34,"",nil,{dis=true});cv:cog(rects,RX-80,by+17,26,((view.now or 0)*120)%360,C.gold)end)
  end
  if st and st.stage~="done"and st.stage~="said"then view.redraw_at=(view.now or 0)+.25;return row(view,cv,y,"Import From Power DI",desc,nil,button(view,cv,160,"Import…",nil,{dis=true}))end
- if st and st.stage=="done"then desc={Backup.matches(st.imported).." imported."}
-  if st.pdi_bytes and st.io_bytes then desc[#desc+1]=size(st.pdi_bytes).." of saves converted into I/O's format at "..size(st.io_bytes).."."end
+ -- the result in two lines, what came in and what to do next, so the row keeps the height it has in every stage
+ if st and st.stage=="done"then local a={Backup.matches(st.imported).." imported."}
+  if st.pdi_bytes and st.io_bytes then a[#a+1]=size(st.pdi_bytes).." of saves converted into I/O's format at "..size(st.io_bytes).."."end
+  -- missions whose files would not fit in the memory left were left out
+  if (st.toobig or 0)>0 and mod.io_powerdi_said then a[#a+1]=mod.io_powerdi_said.toobig(st.toobig)end
   local list=mod.io_backups and mod.io_backups()or {};local latest=list[#list]
-  if latest and latest.powerdi and latest.powerdi[1]then desc[#desc+1]="Restore Latest Backup takes them back out."end;desc[#desc+1]="Importing again adds only Power DI missions that are new."
+  local z={};if latest and latest.powerdi and latest.powerdi[1]then z[#z+1]="Restore Latest Backup takes them back out."end;z[#z+1]="Importing again adds only Power DI missions that are new."
+  desc={table.concat(a," "),table.concat(z," ")}
  end
- return row(view,cv,y,"Import From Power DI",desc,nil,button(view,cv,160,"Import…",start))
+ local resume=mod.io_powerdi_resumable and mod.io_powerdi_resumable()
+ return row(view,cv,y,"Import From Power DI",desc,nil,button(view,cv,160,resume and "Resume…"or "Import…",start))
 end
 -- the popup's four lines, counted from Power DI's list
-local function powerdi_lines(n,m)
- return {n==1 and "1 completed Power DI mission found."or n.." completed Power DI missions found.",m==1 and "1 incomplete mission cannot be imported."or m.." incomplete missions cannot be imported.","A backup will be made first.","If encountering any issues, use Restore Latest Backup."}
+-- resume: an import cut short is picked up, so its missions go into the backup it made rather than a new one
+local function powerdi_lines(n,m,resume)
+ return {n==1 and "1 completed Power DI mission found."or n.." completed Power DI missions found.",m==1 and "1 incomplete mission cannot be imported."or m.." incomplete missions cannot be imported.",resume and "They are added to the backup the stopped import made."or "A backup will be made first.","If encountering any issues, use Restore Latest Backup."}
 end
 local function powerdi_popup(view)
  local st=mod.io_powerdi_status and mod.io_powerdi_status()
  if not st or view.io_modal then return end
  -- nothing to import: the same popup, with what it found and one button
  if st.stage=="said"then local dismiss=function()if mod.io_powerdi_dismiss then mod.io_powerdi_dismiss()end end
-  view.io_modal=Popup.new(view,{title="Import From Power DI",lines=st.lines,buttons={{"OK",dismiss}},cancel=dismiss});return
+  -- the memory popup offers Try Anyway, which starts the import regardless, and Abort; the others a single OK
+  local buttons={{"OK",dismiss}}
+  if st.said=="memory"then buttons={{"Try Anyway",function()dismiss();local ok,why=mod.io_powerdi_request(true);if not ok and mod.io_notify then mod.io_notify(why)end end},{"Abort",dismiss}}end
+  view.io_modal=Popup.new(view,{title="Import From Power DI",lines=st.lines,buttons=buttons,cancel=dismiss});return
  end
  if st.stage~="confirm"then return end
- view.io_modal=Popup.new(view,{title="Import From Power DI",lines=powerdi_lines(st.n,st.m),
+ view.io_modal=Popup.new(view,{title="Import From Power DI",lines=powerdi_lines(st.n,st.m,st.resume),
   buttons={{"Import",function()if mod.io_current()then mod.io_powerdi_confirm()end end},{"Cancel",function()mod.io_powerdi_cancel()end}},
   cancel=function()if mod.io_powerdi_cancel then mod.io_powerdi_cancel()end end})
 end
 local function your_data(view,cv,y)
+ -- while a Power DI import runs, Reset, Restore and Delete Backups are greyed out with a line saying why
+ local busy=mod.io_powerdi_busy and mod.io_powerdi_busy()or nil
+ -- while it runs, the row's help is replaced by the line saying why
+ -- padded to as many lines as its help takes, so no row changes height while the import runs
+ local function held(text)if not busy then return text end;view.redraw_at=math.min(view.redraw_at or math.huge,(view.now or 0)+.5)
+  local n=type(text)=="table"and #text or #P.wrap(view,text,14,math.min(1000,RX-200-(X+36)),F.medium)
+  local l={"Unavailable while a Power DI import runs."};for i=2,n do l[i]=""end;return l end
  local h=45;local echo=function(ok,reason)if ok then mod:echo("%s",reason or "Statistics rebuilt.")else mod:echo("%s",tostring(reason))end end
  local st=mod.io_storage
  if st and st.unavailable then h=h+row(view,cv,y+h,"Saving Is Off",{"Saved data could not be opened, so nothing will be saved until this is fixed.","Your files were left as they are.",tostring(st.error or ""):sub(1,120),hi=1})end
  if mod.io_request_reset then
-  h=h+row(view,cv,y+h,"Reset Statistics","Moves all saved statistics into a backup. Settings are kept.",nil,button(view,cv,160,"Reset…",mod.io_request_reset))
+  h=h+row(view,cv,y+h,"Reset Statistics",held("Moves all saved statistics into a backup. Settings are kept."),nil,button(view,cv,160,"Reset…",not busy and mod.io_request_reset or nil,{dis=busy}))
  end
  local backups=mod.io_backups and mod.io_backups()or {}
+ -- Restore Latest Backup and Delete Backups are always there, greyed out until there is a backup
+ if not backups[1]and mod.io_request_restore then
+  h=h+row(view,cv,y+h,"Restore Latest Backup",held("There is no backup to restore."),nil,button(view,cv,160,"Restore…",nil,{dis=true}))
+  h=h+row(view,cv,y+h,"Restore All Backups",held("There are no backups to restore."),nil,button(view,cv,160,"Restore All…",nil,{dis=true}))
+  h=h+row(view,cv,y+h,"Delete Backups",held("There are no backups to delete."),nil,button(view,cv,160,"Delete…",nil,{dis=true}))
+ end
  if backups[1]and mod.io_request_restore then
   local effect=function(all)return mod.io_restore_effect and mod.io_restore_effect(backups,all)or "Matches played since are kept."end
-  h=h+row(view,cv,y+h,"Restore Latest Backup","Brings back "..Backup.describe(backups,false)..". "..effect(false),nil,button(view,cv,160,"Restore…",function()mod.io_request_restore(false)end))
-  if backups[2]then h=h+row(view,cv,y+h,"Restore All Backups","Brings back "..Backup.describe(backups,true)..". "..effect(true),nil,button(view,cv,160,"Restore All…",function()mod.io_request_restore(true)end))end
-  h=h+row(view,cv,y+h,"Delete Backups","Deletes "..(backups[2]and "all "..#backups.." backups"or "the backup").." for good. Your current statistics are kept.",nil,button(view,cv,160,"Delete…",mod.io_request_delete_backups,{danger=true}))
+  -- a Power DI import's backup says only how many matches it takes out, and how many played since stay
+  local latest=backups[#backups];local say="Brings back "..Backup.describe(backups,false)..". "..effect(false)
+  if type(latest.powerdi)=="table"and latest.powerdi[1]then local since=mod.io_played_since and mod.io_played_since(latest)or 0
+   local gone=mod.io_powerdi_held and mod.io_powerdi_held(latest)or #latest.powerdi
+   say="Will remove "..Backup.matches(gone).."."..(since>0 and " "..Backup.matches(since).." played since "..(since==1 and "is"or "are").." kept."or "")end
+  h=h+row(view,cv,y+h,"Restore Latest Backup",held(say),nil,button(view,cv,160,"Restore…",not busy and function()mod.io_request_restore(false)end or nil,{dis=busy}))
+  -- always there once there is a backup, so a second backup made mid-import adds no row
+  if not backups[2]then h=h+row(view,cv,y+h,"Restore All Backups",held("There is only one backup, which Restore Latest Backup brings back."),nil,button(view,cv,160,"Restore All…",nil,{dis=true}))end
+  if backups[2]then h=h+row(view,cv,y+h,"Restore All Backups",held("Brings back "..Backup.describe(backups,true)..". "..effect(true)),nil,button(view,cv,160,"Restore All…",not busy and function()mod.io_request_restore(true)end or nil,{dis=busy}))end
+  h=h+row(view,cv,y+h,"Delete Backups",held("Deletes "..(backups[2]and "all "..#backups.." backups"or "the backup").." for good. Your current statistics are kept."),nil,button(view,cv,160,"Delete…",not busy and mod.io_request_delete_backups or nil,{danger=true,dis=busy}))
  end
  local reconstruct=function(import)return function()
   if import and mod.io_start_history_import then
@@ -322,10 +361,10 @@ local function your_data(view,cv,y)
    if ok then mod:echo("Importing match history…")else echo(ok,reason)end
   elseif mod.io_reconstruct_history then echo(mod.io_reconstruct_history(import))end
  end end
- h=h+row(view,cv,y+h,"Rebuild Statistics","Recount every record and streak from your saved Match History.",nil,button(view,cv,160,"Rebuild",function()
-  popup("Rebuild Statistics","Rebuild statistics from your saved Match History?\nYour matches are not changed.","Rebuild",reconstruct(false))end))
- h=h+row(view,cv,y+h,"Import Match History",{"Copy I/O match files into","InformationOverload\\Import","Import adds them to the matches on this PC.",hi=2},nil,button(view,cv,160,"Import…",function()
-  popup("Import Match History","Add the matches from the Import folder that are not already on this PC, and rebuild statistics?\nA backup is made first, which Restore Latest Backup uses to take them back out.","Import",reconstruct(true))end))
+ h=h+row(view,cv,y+h,"Rebuild Statistics",held("Recount every record and streak from your saved Match History."),nil,button(view,cv,160,"Rebuild",not busy and function()
+  popup("Rebuild Statistics","Rebuild statistics from your saved Match History?\nYour matches are not changed.","Rebuild",reconstruct(false))end or nil,{dis=busy}))
+ h=h+row(view,cv,y+h,"Import Match History",held("Copy I/O match files into AppData\\Roaming\\Fatshark\\Darktide\\InformationOverload\\Import."),nil,button(view,cv,160,"Import…",not busy and function()
+  popup("Import Match History","Add the matches from the Import folder that are not already on this PC, and rebuild statistics?\nA backup is made first, which Restore Latest Backup uses to take them back out.","Import",reconstruct(true))end or nil,{dis=busy}))
  if mod.io_powerdi_request then h=h+powerdi_row(view,cv,y+h)end
  local counted=Imported.on()
  h=h+row(view,cv,y+h,IMPORTED_TITLE,IMPORTED_HELP,nil,toggle(view,cv,counted,function()mod:set(Imported.KEY,not counted,true)end))
@@ -335,7 +374,7 @@ return function(view,cv,popup_cv)
  local tracker=view:_tracker();local part=view.part or "screens"
  if view.io_set_part~=part then view.io_set_part=part;view.scroll=view.scroll or {};view.scroll.settings=0 end
  if part=="screens"then return Screens.draw(view,cv)end
- view:_sheet(cv,D.top);if cv.sc then cv.sc.y1=D.bottom-34 end
+ view:_sheet(cv,D.top)
  local noop=function()end;local ghost=setmetatable({_jump=noop,_hit=noop,_ctl=noop},{__index=view})
  local function card(fn,y,...)local h,title=fn(ghost,D.canvas(),D.canvas(),y,...);view:_card(cv,X,y,W,h,title);cv.z=5;fn(view,cv,popup_cv,y,...);return h end
  local y=D.top

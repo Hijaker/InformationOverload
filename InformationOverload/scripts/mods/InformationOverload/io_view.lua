@@ -20,7 +20,7 @@ local ORDER={"overview","last","history","trends","records","weapons","classes",
 local PARTS={{"display","Display"},{"counting","Counting"},{"tracked","Tracked Players","friends"},{"data","Data"}}
 local PART_NAMES={screens="Screens"};for _,p in ipairs(PARTS)do PART_NAMES[p[1]]=p[2]end;for _,s in ipairs(Screens.list)do PART_NAMES[s.id]=s.name end
 local LOCKED,SEP=D.rgba(169,191,153,.3),D.rgba(60,78,57,.75)
-local CREDITS={{"HijaKer","Data, Records, Tracking"},{"LilyMods","Interface & Layout"}}
+local CREDITS={{"HijaKer","Data, Records & Tracking"},{"LilyMods","Interface & Layout"}}
 -- the tops of Settings' two groups, each under its heading
 local GROUPS={{"base",10},{"rail",12},{"drawer",40},{"popup",70}}
 -- a card that opens from anywhere on it glows gold on hover: a faint warm fill, a gold edge and rings fading outward
@@ -198,8 +198,16 @@ function View:_ctl(cv,g,x,y,w,h,fn,opt)
  opt=opt or {};local k=opt.dis and .38 or 1
  cv.z=4;cv:rect(x,y,w,h,opt.sel and C.fill_s or opt.open and C.fill_h or C.fill,false,k)
  cv.z=5;cv:edges(x,y,w,h,1,opt.sel and C.sel or opt.open and C.hover or C.frame,false,k);cv:corners(x-1,y-1,w+2,h+2,opt.sel and C.gold or C.corner,false,k)
- if fn and not opt.dis then self:_hit(g,x,y,w,h,fn,opt.hv or (not opt.sel and {bg=C.fill_h,edge=C.hover})or nil,opt.rail,opt.tip)end
- return k
+ local hit;if fn and not opt.dis then hit=self:_hit(g,x,y,w,h,fn,opt.hv or (not opt.sel and {bg=C.fill_h,edge=C.hover})or nil,opt.rail,opt.tip)end
+ return k,hit
+end
+-- a closed dropdown under the pointer steps through its choices with the wheel, up to the one above, down to the one below, coming round at either end
+function View:_wheel(hit,options,pick,current)
+ if not (hit and pick)then return end
+ hit.wheel=function(d)local list,at={},nil
+  for _,o in ipairs(options or {})do if o.value~=nil and not o.h and not o.dis then list[#list+1]=o;if o.value==(o.current~=nil and o.current or current)then at=#list end end end
+  -- past the last choice it comes round to the first, and before the first round to the last
+  local n=at and #list>1 and list[(at-1+d)%#list+1];if n then pick(n.value);return true end end
 end
 -- tip is a list of lines shown while the pointer rests on the area, or a function of the pointer in page coordinates giving them
 -- key names an area the page draws differently while the pointer is on it; the page redraws when that changes
@@ -363,24 +371,16 @@ function View:_render()
  end
  if settings then
   local function piece(y,h,draw)local dc=D.canvas();dc.cx=drawer.cx;draw(dc);rows[#rows+1]={y=y,h=h,dc=dc}end
-  -- the credits at the foot of the gap above Data, across the names: the names side by side, a role too wide for its half wrapping
-  local cx,cw=-208,216
-  local half=cw/#CREDITS;local roles,n={},1
-  for i,c in ipairs(CREDITS)do local lines,line={},""
-   for word in c[2]:gmatch("%S+")do local try=line==""and word or line.." "..word
-    if line~=""and self:_w(try,12,F.medium)>half-8 then lines[#lines+1]=line;line=word else line=try end end
-   lines[#lines+1]=line;roles[i]=lines;n=math.max(n,#lines)
-  end
-  -- a role that fits on one line still splits in two when its neighbour wraps, at the most even break, so the halves match
-  for i,c in ipairs(CREDITS)do if n==2 and #roles[i]==1 then local w={};for word in c[2]:gmatch("%S+")do w[#w+1]=word end
-   local best,at=math.huge;for k=1,#w-1 do local m=math.max(self:_w(table.concat(w," ",1,k),12,F.medium),self:_w(table.concat(w," ",k+1),12,F.medium));if m<best then best,at=m,k end end
-   if at then roles[i]={table.concat(w," ",1,at),table.concat(w," ",at+1)}end end end
-  local y0=788-#PARTS*44-12-(20+n*15)
-  piece(y0,20+n*15,function(dc)
-   for i,c in ipairs(CREDITS)do local x=cx+(i-1)*half;dc:text(c[1],x,y0,half,20,15,C.value,"center")
-    for j,l in ipairs(roles[i])do dc:text(l,x,y0+20+(j-1)*15,half,15,12,C.muted,"center",F.medium)end
-   end
-  end)
+  -- the credits: each name in pale gold inside a short grey line, LilyMods under the screen tabs and HijaKer just above Data, its part in small
+  -- capitals beside it, Interface under LilyMods and Data over HijaKer
+  local cx,cw=-208,216;local foot=788-#PARTS*44-12;local top=62
+  for _,e in ipairs(entries)do if e.top+40<=foot then top=math.max(top,e.top+40)end end
+  local H,L=CREDITS[1],CREDITS[2];local lw=math.floor(cw*.78);local lx=cx+math.floor((cw-lw)/2)
+  local function lined(dc,y,name)local tw=self:_w(name,15);local side=math.max(0,math.floor((lw-tw-16)/2))
+   dc:rect(lx,y+10,side,1,C.frame,true);dc:rect(lx+lw-side,y+10,side,1,C.frame,true);dc:text(name,lx+side+8,y,tw+4,20,15,C.gold_hi,"left")end
+  local function part(dc,y,str)dc:text(str:upper(),cx,y+1,cw,16,11,C.muted,"center",F.medium)end
+  local ty=top+12;piece(ty,38,function(dc)lined(dc,ty,L[1]);part(dc,ty+22,L[2])end)
+  local by=foot-38;piece(by,38,function(dc)part(dc,by,H[2]);lined(dc,by+18,H[1])end)
  end
  self:_ctl(base,"base",1258,20,34,34,function()Managers.ui:close_view(self.view_name,true)end)
  base:cross(1275,37,17,2,C.value)
@@ -389,17 +389,15 @@ function View:_render()
   self:_ctl(base,"base",22,20,44,34,function()self.pinned=not on;mod:set("rail_pinned",self.pinned);return true end,{sel=on})
   self:_icon(base,"pin",34,27,on and C.gold_hi or C.label)
  end
- -- under the page at the right, the credits beside the version: the names lit, the rest muted, a small dot before the version
- do local line={{"By",C.muted,F.medium},{CREDITS[1][1],C.value},{"&",C.muted,F.medium},{CREDITS[2][1],C.value},false,{"v"..tostring(mod.version or ""),C.muted}}
-  local ws,x={},1304;for i,s in ipairs(line)do ws[i]=s and self:_w(s[1],14,s[3])or 3;x=x-ws[i]-(i>1 and (s==false or line[i-1]==false)and 8 or i>1 and 4 or 0)end
-  for i,s in ipairs(line)do if s then base:text(s[1],x,838,ws[i]+2,17,14,s[2],"left",s[3])else base:rect(x,845,3,3,C.muted)end;x=x+ws[i]+(line[i+1]==nil and 0 or (s==false or line[i+1]==false)and 8 or 4)end
- end
+ -- under the page at the right, the version alone, ending at the panel's right edge
+ do local v="v"..tostring(mod.version or "");local w=self:_w(v,14);base:text(v,1304-w,838,w+2,17,14,C.muted,"left")end
  self.io_crumbs_shown,self.io_crumbs_page,self.io_crumbs=self.io_crumbs,self.io_crumbs_drawn,nil;self.io_crumbs_drawn=self.page
  if shell then
   if intro.phase=="talk"then self:_ctl(base,"base",1168,20,80,34,function()intro:skip()end);base:text("Skip",1168,20,80,34,16,C.value,"center")end
  else
   local title=settings and "Settings"or self.page=="overview"and "Information Overload"or NAMES[self.page]or ""
-  base:text(title:upper(),442,12,800,44,32,C.gold,"right",F.title)
+  -- the page title sits level with Back and the close cross, its box centred on theirs
+  base:text(title:upper(),442,15,800,44,32,C.gold,"right",F.title)
   D.picks={}
   if self.page=="overview"then self:_overview(base,popup)
   elseif PAGES[self.page]then local ok,err=pcall(PAGES[self.page],self,base,popup,drawer);if not ok then local said=self.page.."|"..tostring(err);if self.io_said~=said then self.io_said=said;mod:error("I/O %s: %s",self.page,tostring(err))end end end
@@ -542,7 +540,7 @@ end
 -- with no pick it is drawn dimmed and does nothing
 function View:_dropdown(base,popup,id,x,w,label,value,options,pick)
  local open=pick and self.dd==id
- local k=self:_ctl(base,"base",x,D.top,w,34,function()self.dd=not open and id or nil end,{open=open,dis=not pick})
+ local k,h=self:_ctl(base,"base",x,D.top,w,34,function()self.dd=not open and id or nil end,{open=open,dis=not pick});self:_wheel(h,options,pick)
  local lw=self:_w(label,16);base:text(label,x+12,D.top,lw+4,34,16,C.label,nil,nil,k);base:text(self:_fit(value,16,w-lw-56),x+20+lw,D.top,w-lw-56,34,16,C.value,nil,nil,k)
  base:chevron(x+w-24,D.top+13,"down",10,C.value,k)
  if open then self:_options(popup,x,D.top+38,math.max(w,260),options,pick)end
@@ -814,8 +812,11 @@ function View:update(dt,t,input)
   end
  end
  local span=self.sheet_span
+ local ok,wheel=pcall(input.get,input,"scroll_axis");local amount=ok and (type(wheel)=="number"and wheel or wheel and wheel[2])or 0
+ -- over a closed dropdown the wheel changes its choice instead of scrolling the page
+ local wh=amount~=0 and x and not self.dd and not self.io_bar_drag and not self.io_slide and self:_top(x,y)
+ if wh and wh.wheel then if wh.wheel(amount>0 and -1 or 1)then self:_refresh()end;amount=0 end
  if span and x and x>=84 and x<=1306 and y>=span[1]and y<=span[2]and not self.dd and not self.io_bar_drag and not self.io_slide then
-  local ok,wheel=pcall(input.get,input,"scroll_axis");local amount=ok and (type(wheel)=="number"and wheel or wheel and wheel[2])or 0
   if amount~=0 then self.scroll=self.scroll or {};local at=self.scroll[self.page]or 0;local new=math.max(0,math.min(self.scroll_max or 0,at-amount*60))
    if new~=at then self.scroll[self.page]=new;self:_render()end end
  end
