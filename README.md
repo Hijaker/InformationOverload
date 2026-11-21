@@ -32,6 +32,8 @@
 
 Every mission will now be kept saved, as you play.
 
+Used Power DI before? **Settings › Data › Import From Power DI** brings its finished missions into your Match History.
+
 ## What do you want to know?
 
 | Question | Where the answer is |
